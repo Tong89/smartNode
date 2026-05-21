@@ -2,8 +2,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
-dist/
 build/
+.claude/
 *.log
 .env
 .idea/
