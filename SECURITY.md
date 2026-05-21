@@ -1,19 +1,17 @@
 # Security Policy
 
-## 支持范围
+SmartNode is currently designed for local simulation and research demos.
 
-当前开源版本为演示和科研仿真用途，默认运行在本地开放 API 模式。
+## Reporting
 
-## 报告安全问题
+Please avoid publishing exploitable details in public issues. Contact the maintainer through GitHub and include:
 
-请不要在公开 Issue 中披露可被利用的漏洞细节。可以通过 GitHub 私信或仓库维护者公开联系方式联系作者，并尽量提供：
+- Impact scope.
+- Reproduction steps.
+- Suggested mitigation if available.
 
-- 漏洞影响范围。
-- 复现步骤。
-- 可能的修复建议。
+## Deployment Notes
 
-## 安全说明
-
-- 当前版本已移除密码登录和角色权限逻辑。
-- 请勿直接将本地开发服务器暴露到公网。
-- 如果需要公网部署，请在反向代理或网关层增加认证、限流和访问控制。
+- Password login and role permission checks have been removed.
+- Do not expose the development server directly to the public internet.
+- For public deployment, add authentication, rate limiting, and access control at the gateway or reverse proxy layer.

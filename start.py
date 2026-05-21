@@ -18,11 +18,11 @@ if sys.stdout:
 ROOT = os.path.dirname(os.path.abspath(__file__))
 os.chdir(ROOT)
 
-import main  # noqa: E402
+from backend.api import app  # noqa: E402
 
 
 def run_server():
-    main.app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False, threaded=True)
+    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False, threaded=True)
 
 
 def open_window(url):

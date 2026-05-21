@@ -12,8 +12,5 @@ assignees: ""
 ## Proposed Solution
 
 
-## Alternatives
-
-
 ## Additional Context
 

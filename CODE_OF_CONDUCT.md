@@ -1,18 +1,17 @@
 # Code of Conduct
 
-本项目希望保持开放、友好、专业的协作氛围。
+This project aims to keep collaboration open, professional, and respectful.
 
-## 我们鼓励
+## Expected Behavior
 
-- 尊重不同背景和经验水平的贡献者。
-- 用清晰、建设性的方式讨论技术问题。
-- 聚焦问题本身，避免人身攻击。
-- 在提出批评时尽量给出可执行建议。
+- Be respectful and constructive.
+- Focus on technical problems and reproducible facts.
+- Help make discussions clear for contributors with different backgrounds.
 
-## 我们不接受
+## Unacceptable Behavior
 
-- 侮辱、歧视、骚扰或威胁。
-- 泄露他人隐私信息。
-- 持续发布无关内容或恶意干扰项目维护。
+- Harassment, threats, discrimination, or personal attacks.
+- Publishing private information without consent.
+- Repeatedly disrupting project discussions.
 
-维护者可以删除不当内容、关闭讨论或限制参与权限。
+Maintainers may remove inappropriate content or restrict participation when needed.

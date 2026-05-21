@@ -23,7 +23,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Compile backend
-        run: python -m py_compile main.py backend/app.py start.py
+        run: python -m py_compile main.py backend/app.py backend/api.py backend/core.py start.py
 
       - name: Check frontend script
         run: node --check frontend/app.js
