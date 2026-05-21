@@ -353,20 +353,43 @@ const app = Vue.createApp({
           const satellite = satMap.get(req.satellite_id);
           if (!satellite) return;
 
-          if (req.selected_relay && geoMap.has(req.selected_relay)) {
-            this.drawLink(satellite, geoMap.get(req.selected_relay), linkColor);
-          }
-
-          if (req.selected_relay2 && geoMap.has(req.selected_relay2)) {
-            this.drawLink(satellite, geoMap.get(req.selected_relay2), linkColor);
-          }
-
-          if (req.selected_ground_station && gsMap.has(req.selected_ground_station)) {
-            this.drawLink(satellite, gsMap.get(req.selected_ground_station), linkColor);
-          }
+          this.drawRequestLinks(req, satellite, geoMap, gsMap, linkColor);
         });
 
       this.viewer.scene.requestRender();
+    },
+
+    drawRequestLinks(req, satellite, geoMap, gsMap, color) {
+      const groundStation = req.selected_ground_station
+        ? gsMap.get(req.selected_ground_station)
+        : null;
+      const firstRelay = req.selected_relay
+        ? geoMap.get(req.selected_relay)
+        : null;
+      const secondRelay = req.selected_relay2
+        ? geoMap.get(req.selected_relay2)
+        : null;
+
+      if (firstRelay && secondRelay) {
+        this.drawLink(satellite, firstRelay, color);
+        this.drawLink(firstRelay, secondRelay, color);
+        if (groundStation) {
+          this.drawLink(secondRelay, groundStation, color);
+        }
+        return;
+      }
+
+      if (firstRelay) {
+        this.drawLink(satellite, firstRelay, color);
+        if (groundStation) {
+          this.drawLink(firstRelay, groundStation, color);
+        }
+        return;
+      }
+
+      if (groundStation && req.transmission_method === 'direct') {
+        this.drawLink(satellite, groundStation, color);
+      }
     },
 
     makeLabel(text, color, pixelOffsetY) {
