@@ -895,7 +895,53 @@ class SimulationEngine:
         
         # 开始仿真
         self.start_simulation()
-    
+
+    def reset_requests(self):
+        """Clear all request/runtime transmission state for a fresh server start."""
+        with self.lock:
+            self.transmission_requests.clear()
+            self.request_history.clear()
+            TransmissionRequest._id_counter = 0
+            self.resource_usage = {
+                "satellites": {},
+                "ground_stations": {},
+                "geo_relays": {}
+            }
+            self.resource_time_pool = {
+                "satellites": {sat.sat_id: [] for sat in self.leo_satellites},
+                "ground_stations": {gs["id"]: [] for gs in self.all_ground_stations},
+                "geo_relays": {geo["id"]: [] for geo in self.geo_relays}
+            }
+            self.stats.update({
+                "total_requests": 0,
+                "user_requests": 0,
+                "background_requests": 0,
+                "accepted_requests": 0,
+                "rejected_requests": 0,
+                "rejected_by_resource": 0,
+                "transmitting_requests": 0,
+                "completed_requests": 0,
+                "total_data_transmitted": 0.0,
+                "resource_utilization": {
+                    "satellites": 0.0,
+                    "ground_stations": 0.0,
+                    "geo_relays": 0.0
+                },
+                "decision_metrics": {
+                    "acceptance_rate": 0.0,
+                    "completion_rate": 0.0,
+                    "avg_scheduling_time": 0.0,
+                    "avg_transmission_time": 0.0,
+                    "throughput_mbps": 0.0,
+                    "total_scheduling_time": 0.0,
+                    "total_transmission_time": 0.0,
+                    "scheduling_count": 0,
+                    "transmission_count": 0
+                },
+                "rejection_distribution": {},
+                "relay_bandwidth_usage": {}
+            })
+
     def _log(self, message, level="normal", request=None):
         """
         统一日志输出方法 - 支持遥测级别控制
@@ -1383,6 +1429,12 @@ class SimulationEngine:
                 if satellite:
                     sat_pos = self.get_satellite_position(satellite)
 
+                    if not self._current_link_available(req, sat_pos):
+                        if not self._reroute_transmission(req, satellite, sat_pos):
+                            self._log("当前传输链路不可见且无可用替代链路，传输中断", request=req, level="normal")
+                            self._interrupt_request(req, "LINK_INTERRUPTED")
+                            continue
+
                     # --------------------------------------------------
                     # ⭐⭐⭐ 核心修改：动态链路切换逻辑 (中继 -> 地面站) ⭐⭐⭐
                     # --------------------------------------------------
@@ -1461,12 +1513,7 @@ class SimulationEngine:
                     # 错误注入：中断
                     if req.error_injection and req.error_injection.get("type") == "interrupt":
                          if random.random() < 0.01: # 1%概率中断
-                             req.status = "rejected"
-                             req.reject_reason = REJECTION_REASONS["LINK_INTERRUPTED"]
-                             self._record_rejection("LINK_INTERRUPTED")
-                             self.transmission_requests.remove(req)
-                             self.request_history.append(req)
-                             self._release_resources(req.id)
+                             self._interrupt_request(req, "LINK_INTERRUPTED")
                              continue
 
                     # ⭐ 使用正确的单位计算进度
@@ -1541,6 +1588,142 @@ class SimulationEngine:
         #     print(f"   GEO @ {geo_pos['lon']}° 可见 LEO @ ({leo_pos['lat']:.1f}°, {leo_pos['lon']:.1f}°), 角度: {angle:.1f}°")
         return visible
     
+    def _resource_busy_by_other(self, resource_type, resource_id, req_id):
+        return any(
+            existing_req_id != req_id
+            for existing_req_id in self.resource_usage.get(resource_type, {}).get(resource_id, [])
+        )
+
+    def _ground_station_candidates(self, req):
+        if req.selected_ground_stations:
+            selected = set(req.selected_ground_stations)
+            return [gs for gs in self.ground_stations if gs["id"] in selected]
+        return self.ground_stations
+
+    def _relay_can_carry_request(self, relay_id, required_rate, req):
+        if relay_id in [req.selected_relay, req.selected_relay2]:
+            return True
+        return self._check_relay_bandwidth_available(relay_id, required_rate)
+
+    def _find_best_available_link(self, req, satellite, sat_pos):
+        data_config = DATA_TYPES.get(req.data_type, {})
+        allowed_links = data_config.get("allowed_links", ["direct"])
+        is_immediate_type = req.data_type in ["TASK_CMD", "INTEL"]
+        best_link = None
+        best_rate = 0
+
+        def can_use_satellite():
+            return is_immediate_type or not self._resource_busy_by_other("satellites", satellite.sat_id, req.id)
+
+        def can_use_ground_station(gs_id):
+            return is_immediate_type or not self._resource_busy_by_other("ground_stations", gs_id, req.id)
+
+        if "direct" in allowed_links and can_use_satellite():
+            for gs in self._ground_station_candidates(req):
+                if can_use_ground_station(gs["id"]) and self.check_visibility(sat_pos, gs, min_elevation=10):
+                    rate = self._calculate_direct_rate(sat_pos, gs, req.data_type)
+                    if rate > best_rate:
+                        best_rate = rate
+                        best_link = {
+                            "method": "direct",
+                            "ground_station": gs["id"],
+                            "relay": None,
+                            "relay2": None,
+                            "rate": rate
+                        }
+
+        if "relay" in allowed_links and can_use_satellite():
+            for geo in self.geo_relays:
+                geo_pos = self.get_geo_position(geo)
+                if not self.check_geo_visibility(sat_pos, geo_pos):
+                    continue
+                for gs in self._ground_station_candidates(req):
+                    if not can_use_ground_station(gs["id"]):
+                        continue
+                    if not self.check_visibility(geo_pos, gs, min_elevation=5):
+                        continue
+                    rate = self._calculate_relay_rate(sat_pos, geo_pos, gs, req.data_type)
+                    if rate > best_rate and self._relay_can_carry_request(geo["id"], rate, req):
+                        best_rate = rate
+                        best_link = {
+                            "method": "relay",
+                            "ground_station": gs["id"],
+                            "relay": geo["id"],
+                            "relay2": None,
+                            "rate": rate
+                        }
+
+        return best_link
+
+    def _current_link_available(self, req, sat_pos):
+        if req.transmission_method == "direct":
+            gs = next((item for item in self.ground_stations if item["id"] == req.selected_ground_station), None)
+            return bool(gs and self.check_visibility(sat_pos, gs, min_elevation=5))
+
+        if req.transmission_method == "relay":
+            geo = next((item for item in self.geo_relays if item["id"] == req.selected_relay), None)
+            gs = next((item for item in self.ground_stations if item["id"] == req.selected_ground_station), None)
+            if not geo or not gs:
+                return False
+            geo_pos = self.get_geo_position(geo)
+            return self.check_geo_visibility(sat_pos, geo_pos) and self.check_visibility(geo_pos, gs, min_elevation=5)
+
+        if req.transmission_method == "multi_relay":
+            geo1 = next((item for item in self.geo_relays if item["id"] == req.selected_relay), None)
+            geo2 = next((item for item in self.geo_relays if item["id"] == req.selected_relay2), None)
+            gs = next((item for item in self.ground_stations if item["id"] == req.selected_ground_station), None)
+            if not geo1 or not geo2 or not gs:
+                return False
+            geo1_pos = self.get_geo_position(geo1)
+            geo2_pos = self.get_geo_position(geo2)
+            geo_gap = calc_central_angle(geo1_pos["lat"], geo1_pos["lon"], geo2_pos["lat"], geo2_pos["lon"])
+            return (
+                self.check_geo_visibility(sat_pos, geo1_pos)
+                and geo_gap < 140
+                and self.check_visibility(geo2_pos, gs, min_elevation=5)
+            )
+
+        return False
+
+    def _apply_link_assignment(self, req, satellite, link):
+        self._release_resources(req.id)
+        req.transmission_method = link["method"]
+        req.selected_ground_station = link["ground_station"]
+        req.selected_relay = link["relay"]
+        req.selected_relay2 = link["relay2"]
+        req.transmission_rate = link["rate"]
+        self._occupy_resources(
+            req.id,
+            satellite.sat_id,
+            req.selected_ground_station,
+            req.selected_relay,
+            req.selected_relay2
+        )
+
+    def _reroute_transmission(self, req, satellite, sat_pos):
+        link = self._find_best_available_link(req, satellite, sat_pos)
+        if not link:
+            return False
+        old_method = req.transmission_method
+        self._apply_link_assignment(req, satellite, link)
+        self._log(
+            f"链路重调度: {old_method} -> {req.transmission_method}, 速率:{req.transmission_rate:.1f}Mbps",
+            request=req,
+            level="normal"
+        )
+        return True
+
+    def _interrupt_request(self, req, reason_code="LINK_INTERRUPTED"):
+        req.status = "rejected"
+        req.reject_reason = REJECTION_REASONS[reason_code]
+        self._record_rejection(reason_code)
+        if req in self.transmission_requests:
+            self.transmission_requests.remove(req)
+        self.request_history.append(req)
+        self.stats["transmitting_requests"] = max(0, self.stats.get("transmitting_requests", 0) - 1)
+        self.stats["rejected_requests"] += 1
+        self._release_resources(req.id)
+
     def submit_request(self, request_data):
         """提交用户传输请求 - 基于实时资源占用决策"""
         with self.lock:

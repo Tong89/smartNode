@@ -608,6 +608,7 @@ def favicon():
 
 
 def run(host='0.0.0.0', port=5000, debug=False):
+    simulation_engine.reset_requests()
     app.run(debug=debug, host=host, port=port, use_reloader=False, threaded=True)
 
 

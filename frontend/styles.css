@@ -538,7 +538,7 @@ progress::-moz-progress-bar {
 
 .request-row {
   display: grid;
-  grid-template-columns: minmax(72px, 0.9fr) minmax(76px, 1fr) minmax(72px, 0.8fr) 56px;
+  grid-template-columns: minmax(72px, 0.9fr) minmax(76px, 1fr) minmax(64px, 0.8fr) minmax(54px, 0.7fr) 56px;
   gap: 8px;
   align-items: center;
   min-height: 38px;
@@ -656,7 +656,7 @@ progress::-moz-progress-bar {
   }
 
   .rail {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     grid-auto-flow: column;
   }
 

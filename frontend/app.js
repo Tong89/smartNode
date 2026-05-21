@@ -33,7 +33,7 @@ const app = Vue.createApp({
     return {
       apiBase,
       apiBaseDraft: apiBase || window.location.origin,
-      activeView: 'overview',
+      activeView: 'requests',
       backendOnline: false,
       cesiumReady: false,
       viewer: null,
@@ -511,6 +511,13 @@ const app = Vue.createApp({
 
     labelStatus(status) {
       return STATUS_LABELS[status] || status || '未知';
+    },
+
+    labelLinkMode(req) {
+      if (req.transmission_method === 'direct') return '直连';
+      if (req.transmission_method === 'relay') return '中继';
+      if (req.transmission_method === 'multi_relay') return '多跳';
+      return '-';
     },
 
     formatProgress(progress) {

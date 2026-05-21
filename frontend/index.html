@@ -39,10 +39,6 @@
 
     <main class="workspace">
       <nav class="rail" aria-label="视图切换">
-        <button :class="{ active: activeView === 'overview' }" type="button" @click="setView('overview')" title="态势">
-          <i data-lucide="radar"></i>
-          <span>态势</span>
-        </button>
         <button :class="{ active: activeView === 'requests' }" type="button" @click="setView('requests')" title="任务">
           <i data-lucide="send"></i>
           <span>任务</span>
@@ -204,12 +200,14 @@
               <span>编号</span>
               <span>类型</span>
               <span>状态</span>
+              <span>链路</span>
               <span>进度</span>
             </div>
             <div v-for="req in recentRequests" :key="req.id" class="request-row">
               <span>{{ req.id }}</span>
               <span>{{ labelDataType(req.data_type) }}</span>
               <span :class="['status-pill', req.status]">{{ labelStatus(req.status) }}</span>
+              <span>{{ labelLinkMode(req) }}</span>
               <span>{{ formatProgress(req.progress) }}</span>
             </div>
             <div v-if="recentRequests.length === 0" class="empty-state">暂无任务请求</div>
