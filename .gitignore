@@ -1,13 +1,2 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-build/
 .claude/
-*.log
-.env
-.idea/
 .vscode/
-node_modules/
-.DS_Store
-Thumbs.db
