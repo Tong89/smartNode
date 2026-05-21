@@ -1,44 +1,13 @@
-# Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-.Python
 .venv/
 venv/
-env/
-ENV/
-pip-wheel-metadata/
-*.egg-info/
-
-# Build artifacts
-build/
 dist/
-*.spec.bak
-
-# Logs and local runtime files
+build/
 *.log
-*.pid
 .env
-.env.*
-!.env.example
-
-# IDE
 .idea/
 .vscode/
-
-# OS
+node_modules/
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Test and coverage
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Node tooling
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
