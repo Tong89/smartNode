@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>天基智枢 SmartNode 仿真平台</title>
+  <link rel="stylesheet" href="https://unpkg.com/cesium@1.108/Build/Cesium/Widgets/widgets.css">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://unpkg.com/cesium@1.108/Build/Cesium/Cesium.js"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+  <div id="app" class="shell" v-cloak>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">CD</span>
+        <div>
+          <strong>天基智枢 SmartNode 仿真平台</strong>
+          <small>Space-Based Intelligent Relay Simulation Platform</small>
+        </div>
+      </div>
+
+      <div class="status-strip">
+        <span :class="['service-dot', backendOnline ? 'is-online' : 'is-offline']"></span>
+        <span>{{ backendOnline ? '后端在线' : '等待后端' }}</span>
+        <span class="splitter"></span>
+        <span>仿真时钟 {{ formatTime(systemTime) }}</span>
+      </div>
+
+      <div class="api-control">
+        <i data-lucide="server"></i>
+        <input v-model="apiBaseDraft" @keyup.enter="saveApiBase" placeholder="API Base">
+        <button class="icon-button" type="button" @click="saveApiBase" title="保存 API 地址">
+          <i data-lucide="check"></i>
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <nav class="rail" aria-label="视图切换">
+        <button :class="{ active: activeView === 'overview' }" type="button" @click="setView('overview')" title="态势">
+          <i data-lucide="radar"></i>
+          <span>态势</span>
+        </button>
+        <button :class="{ active: activeView === 'requests' }" type="button" @click="setView('requests')" title="任务">
+          <i data-lucide="send"></i>
+          <span>任务</span>
+        </button>
+        <button :class="{ active: activeView === 'resources' }" type="button" @click="setView('resources')" title="资源">
+          <i data-lucide="sliders-horizontal"></i>
+          <span>资源</span>
+        </button>
+      </nav>
+
+      <section class="map-area" aria-label="空间态势">
+        <div id="cesiumContainer" class="map-canvas"></div>
+        <div v-if="!cesiumReady" class="map-fallback">
+          <strong>三维地球加载中</strong>
+          <span>如果 CDN 不可用，数据面板仍可继续使用。</span>
+        </div>
+
+        <div class="metrics-ribbon">
+          <div class="metric">
+            <span>在轨卫星</span>
+            <strong>{{ satelliteCount }}</strong>
+          </div>
+          <div class="metric">
+            <span>地面站</span>
+            <strong>{{ groundStationCount }}</strong>
+          </div>
+          <div class="metric">
+            <span>中继星</span>
+            <strong>{{ geoRelayCount }}</strong>
+          </div>
+          <div class="metric">
+            <span>请求总量</span>
+            <strong>{{ stats.total_requests || 0 }}</strong>
+          </div>
+        </div>
+
+        <div class="map-legend">
+          <span><b class="legend-dot sat"></b> LEO/MEO</span>
+          <span><b class="legend-dot gs"></b> 地面站</span>
+          <span><b class="legend-dot geo"></b> GEO 中继</span>
+          <span><b class="legend-line"></b> 活动链路</span>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <section class="tool-panel" v-show="activeView !== 'resources'">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">任务编排</span>
+              <h2>提交回传请求</h2>
+            </div>
+            <button class="icon-button" type="button" @click="submitRequest" :disabled="submitting" title="提交">
+              <i data-lucide="send-horizontal"></i>
+            </button>
+          </div>
+
+          <form class="request-form" @submit.prevent="submitRequest">
+            <label>
+              <span>数据类型</span>
+              <select v-model="requestForm.data_type">
+                <option v-for="item in dataTypeOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+              </select>
+            </label>
+            <div class="form-grid">
+              <label>
+                <span>数据量</span>
+                <input v-model.number="requestForm.data_size" type="number" min="1" step="1">
+              </label>
+              <label>
+                <span>优先级</span>
+                <input v-model.number="requestForm.priority" type="number" min="1" max="10" step="1">
+              </label>
+            </div>
+            <label>
+              <span>最大等待秒数</span>
+              <input v-model.number="requestForm.max_delay" type="number" min="60" step="60">
+            </label>
+            <label>
+              <span>指定卫星</span>
+              <select v-model="requestForm.satellite_id">
+                <option value="">自动选择</option>
+                <option v-for="sat in leoSatellites" :key="sat.id" :value="sat.id">{{ sat.id }} · {{ sat.name }}</option>
+              </select>
+            </label>
+            <label>
+              <span>优先地面站</span>
+              <select v-model="requestForm.ground_station_id">
+                <option value="">自动选择</option>
+                <option v-for="station in groundStations" :key="station.id" :value="station.id">{{ station.id }} · {{ station.name }}</option>
+              </select>
+            </label>
+            <button class="primary-button" type="submit" :disabled="submitting">
+              <i data-lucide="play"></i>
+              <span>{{ submitting ? '提交中' : '启动任务' }}</span>
+            </button>
+          </form>
+
+          <p v-if="notice" :class="['notice', noticeType]">{{ notice }}</p>
+        </section>
+
+        <section class="tool-panel" v-show="activeView === 'resources'">
+          <div class="panel-heading">
+            <div>
+              <span class="eyebrow">资源控制</span>
+              <h2>调整仿真规模</h2>
+            </div>
+            <button class="icon-button" type="button" @click="refreshAll" title="刷新">
+              <i data-lucide="refresh-cw"></i>
+            </button>
+          </div>
+
+          <div class="control-stack">
+            <label>
+              <span>地面站数量</span>
+              <input v-model.number="resourceForm.ground_station_count" type="number" min="1" step="1">
+            </label>
+            <button class="secondary-button" type="button" @click="updateGroundStations">
+              <i data-lucide="radio-tower"></i>
+              <span>应用地面站</span>
+            </button>
+            <label>
+              <span>LEO 卫星数量</span>
+              <input v-model.number="resourceForm.leo_satellite_count" type="number" min="1" step="1">
+            </label>
+            <button class="secondary-button" type="button" @click="updateLeoSatellites">
+              <i data-lucide="orbit"></i>
+              <span>应用卫星</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="tool-panel">
+          <div class="panel-heading compact">
+            <div>
+              <span class="eyebrow">资源占用</span>
+              <h2>实时利用率</h2>
+            </div>
+          </div>
+          <div class="resource-bars">
+            <div v-for="item in utilizationRows" :key="item.key" class="resource-row">
+              <div>
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value.toFixed(1) }}%</strong>
+              </div>
+              <progress :value="item.value" max="100"></progress>
+            </div>
+          </div>
+        </section>
+
+        <section class="tool-panel request-list">
+          <div class="panel-heading compact">
+            <div>
+              <span class="eyebrow">任务队列</span>
+              <h2>最近请求</h2>
+            </div>
+          </div>
+          <div class="request-table">
+            <div class="request-row head">
+              <span>编号</span>
+              <span>类型</span>
+              <span>状态</span>
+              <span>进度</span>
+            </div>
+            <div v-for="req in recentRequests" :key="req.id" class="request-row">
+              <span>{{ req.id }}</span>
+              <span>{{ labelDataType(req.data_type) }}</span>
+              <span :class="['status-pill', req.status]">{{ labelStatus(req.status) }}</span>
+              <span>{{ formatProgress(req.progress) }}</span>
+            </div>
+            <div v-if="recentRequests.length === 0" class="empty-state">暂无任务请求</div>
+          </div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
