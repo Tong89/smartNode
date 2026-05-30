@@ -25,22 +25,22 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Set up QEMU for cross-architecture builds (arm64 needs emulation on amd64 runner)
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: linux/amd64,linux/arm64
 
       # Enable Docker Buildx (multi-platform + advanced caching support)
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # Authenticate to GHCR — skipped on pull_request events from forks (no write permission)
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -52,7 +52,7 @@ jobs:
       #   • pull request      → ghcr.io/tong89/smartnode:pr-<number>   (build-only, no push)
       - name: Extract Docker metadata (tags & labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -75,7 +75,7 @@ jobs:
       # Layer caching via registry cache (type=registry) re-uses unchanged layers
       # across workflow runs, avoiding full rebuilds on incremental changes.
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile

@@ -27,11 +27,11 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Initialize CodeQL tools and create the analysis database
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           # Use the default security-and-quality query suite which includes:
@@ -43,11 +43,11 @@ jobs:
 
       # Auto-build for interpreted languages (Python does not need compilation)
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       # Run the CodeQL analysis and upload results to the Security tab
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: '/language:${{ matrix.language }}'
           # Upload results as SARIF to GitHub Security tab
@@ -57,7 +57,7 @@ jobs:
 
       - name: Upload CodeQL SARIF as artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codeql-sarif-${{ matrix.language }}
           path: codeql-results-${{ matrix.language }}.sarif
