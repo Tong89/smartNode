@@ -1304,7 +1304,21 @@ class SimulationEngine:
         if rate_mbps <= 0:
             return float('inf')
         return (data_size_mb * 8) / rate_mbps  # 数据量(MB) * 8 / 速率(Mbps) = 时间(秒)
-    
+
+    def _data_size_to_mb(self, req):
+        """将请求 data_size 按其数据类型的 size_unit 统一归一到 MB。
+
+        所有换算点（进度计算、时间窗校验、吞吐累计）统一复用本函数，避免 KB/MB/GB 混算。
+        """
+        data_config = DATA_TYPES.get(req.data_type, {})
+        size_unit = data_config.get("size_unit", "MB")
+        size = req.data_size or 0
+        if size_unit == "KB":
+            return size / 1024
+        if size_unit == "GB":
+            return size * 1024
+        return size
+
     def _update_transmissions(self, delta_time):
         """更新所有传输任务的进度 (包含动态链路切换逻辑)"""
         for req in self.transmission_requests[:]:
@@ -1526,15 +1540,9 @@ class SimulationEngine:
                     # 数据量 = 速率(Mbps) × 时间(s) / 8 = MegaBytes
                     data_transmitted_mb = req.transmission_rate * delta_time / 8  # MB
                     
-                    # ⭐ 根据数据类型转换 data_size 到 MB
-                    data_config = DATA_TYPES.get(req.data_type, {})
-                    size_unit = data_config.get("size_unit", "MB")
-                    data_size_mb = req.data_size
-                    if size_unit == "KB":
-                        data_size_mb = req.data_size / 1024
-                    elif size_unit == "GB":
-                        data_size_mb = req.data_size * 1024
-                    
+                    # ⭐ 根据数据类型统一转换 data_size 到 MB
+                    data_size_mb = self._data_size_to_mb(req)
+
                     # 错误注入：中断
                     if req.error_injection and req.error_injection.get("type") == "interrupt":
                          if random.random() < 0.01: # 1%概率中断
@@ -1562,7 +1570,8 @@ class SimulationEngine:
                         
                         # 释放资源
                         self._release_resources(req.id)
-                        self.stats["total_data_transmitted"] += req.data_size
+                        # 累加归一后的 MB，避免 KB/MB/GB 混加导致吞吐量失真
+                        self.stats["total_data_transmitted"] += data_size_mb
                         
                         self._log(
                             f"传输完成 - 耗时:{self.current_time - req.start_transmit_time:.1f}s, "
@@ -1871,17 +1880,9 @@ class SimulationEngine:
             if available_duration <= 0:
                 return False, "TIME_WINDOW_INVALID"
             
-            # 计算所需传输时间 (data_size单位可能是KB/MB/GB)
-            data_config = DATA_TYPES.get(req.data_type, {})
-            size_unit = data_config.get("size_unit", "MB")
-            
-            # 统一转换为MB
-            data_size_mb = req.data_size
-            if size_unit == "KB":
-                data_size_mb = req.data_size / 1024
-            elif size_unit == "GB":
-                data_size_mb = req.data_size * 1024
-            
+            # 计算所需传输时间 (data_size单位可能是KB/MB/GB) - 统一归一到 MB
+            data_size_mb = self._data_size_to_mb(req)
+
             # 计算所需时间 (秒) = 数据量(MB) / 速率(Mbps) * 8
             if estimated_rate > 0:
                 required_duration = (data_size_mb * 8) / estimated_rate
@@ -1908,15 +1909,9 @@ class SimulationEngine:
         if start_time >= end_time:
             return False, REJECTION_REASONS["TIME_WINDOW_INVALID"]
         
-        # 计算数据大小（转换为MB）
-        data_config = DATA_TYPES.get(req.data_type, {})
-        size_unit = data_config.get("size_unit", "MB")
-        data_size_mb = req.data_size
-        if size_unit == "KB":
-            data_size_mb = req.data_size / 1024
-        elif size_unit == "GB":
-            data_size_mb = req.data_size * 1024
-        
+        # 计算数据大小（统一归一到 MB）
+        data_size_mb = self._data_size_to_mb(req)
+
         # 估算传输速率（根据数据类型）
         estimated_rate = 100  # 默认100 Mbps
         if req.data_type == "RAW_IMAGE":
