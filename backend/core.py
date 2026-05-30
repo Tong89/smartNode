@@ -360,9 +360,11 @@ class SimulationEngine:
         return self._resources.time_pool
 
     
-    def __init__(self, ground_station_count=DEFAULT_GROUND_STATION_COUNT, leo_satellite_count=DEFAULT_LEO_SATELLITE_COUNT):
+    def __init__(self, ground_station_count=DEFAULT_GROUND_STATION_COUNT, leo_satellite_count=DEFAULT_LEO_SATELLITE_COUNT, rng=None, autostart=True):
         self.current_time = 0.0
         self.running = False
+        # 可注入随机源以保证可复现（未注入则用独立 Random 实例，不污染全局 random）
+        self.rng = rng if rng is not None else random.Random()
         # ⭐ 使用 RLock（可重入锁）减少死锁风险
         self.lock = threading.RLock()
 
@@ -378,7 +380,7 @@ class SimulationEngine:
         self.all_ground_stations = CHINA_GROUND_STATIONS
         self.ground_station_count = max(MIN_GROUND_STATION_COUNT, 
                                         min(ground_station_count, MAX_GROUND_STATION_COUNT))
-        self.ground_stations = random.sample(self.all_ground_stations, self.ground_station_count)
+        self.ground_stations = self.rng.sample(self.all_ground_stations, self.ground_station_count)
 
         # 传输请求队列
         self.transmission_requests = []
@@ -432,8 +434,9 @@ class SimulationEngine:
             "rejection_distribution": {}
         }
         
-        # 开始仿真
-        self.start_simulation()
+        # 仅在 autostart 时启动后台线程（工厂可显式控制）
+        if autostart:
+            self.start_simulation()
 
     def reset_requests(self):
         """Clear all request/runtime transmission state for a fresh server start."""
@@ -570,7 +573,7 @@ class SimulationEngine:
             # 随机选择数据类型(背景任务倾向于小数据)
             data_types = ["TASK_CMD", "INTEL", "DATA_SLICE"]
             weights = [0.5, 0.3, 0.2]
-            data_type = random.choices(data_types, weights=weights)[0]
+            data_type = self.rng.choices(data_types, weights=weights)[0]
             
             # 根据类型生成数据大小（DATA_TYPES 只有 size_range/size_unit，无 typical_size）
             data_config = DATA_TYPES.get(data_type, {})
@@ -578,11 +581,11 @@ class SimulationEngine:
             if not isinstance(size_range, (tuple, list)) or len(size_range) < 2:
                 size_range = (1, 100)
             # data_size 单位与该数据类型的 size_unit 一致（与用户请求口径相同）
-            data_size = random.uniform(size_range[0], size_range[1])
+            data_size = self.rng.uniform(size_range[0], size_range[1])
             
             # 背景任务优先级较低
-            priority = random.randint(1, 2)
-            max_delay = random.uniform(1800, 3600)
+            priority = self.rng.randint(1, 2)
+            max_delay = self.rng.uniform(1800, 3600)
             
             # 选择负载最低的卫星
             satellite_loads = {}
@@ -595,7 +598,7 @@ class SimulationEngine:
             
             min_load = min(satellite_loads.values())
             candidates = [sat for sat in self.leo_satellites if satellite_loads[sat.sat_id] == min_load]
-            satellite = random.choice(candidates)
+            satellite = self.rng.choice(candidates)
             
             # 创建背景任务
             req = TransmissionRequest(
@@ -975,7 +978,7 @@ class SimulationEngine:
 
                     # 错误注入：中断
                     if req.error_injection and req.error_injection.get("type") == "interrupt":
-                         if random.random() < 0.01: # 1%概率中断
+                         if self.rng.random() < 0.01: # 1%概率中断
                              self._interrupt_request(req, "LINK_INTERRUPTED")
                              continue
 
@@ -1101,7 +1104,7 @@ class SimulationEngine:
                 # 选择负载最低的卫星(如果有多个则随机选一个)
                 min_load = min(satellite_loads.values())
                 candidates = [sat for sat in self.leo_satellites if satellite_loads[sat.sat_id] == min_load]
-                satellite = random.choice(candidates)
+                satellite = self.rng.choice(candidates)
             
             # ⭐ 处理选中的地面站列表（保存到请求对象，供后续调度使用）
             selected_ground_stations = request_data.get("selected_ground_stations", [])
@@ -1720,7 +1723,7 @@ class SimulationEngine:
             if new_count != self.ground_station_count:
                 self.ground_station_count = new_count
                 # 重新随机选择地面站
-                self.ground_stations = random.sample(self.all_ground_stations, self.ground_station_count)
+                self.ground_stations = self.rng.sample(self.all_ground_stations, self.ground_station_count)
                 return True
             return False
     
@@ -1773,7 +1776,7 @@ class SimulationEngine:
                     available_sats = [sat for sat in self.leo_satellites 
                                      if sat.sat_id not in self.resource_usage.get("satellites", {})]
                     if available_sats:
-                        new_sat = random.choice(available_sats)
+                        new_sat = self.rng.choice(available_sats)
                         req.satellite_id = new_sat.sat_id
                         self._start_transmission(req, new_sat)
                     else:
@@ -1884,13 +1887,12 @@ class SimulationEngine:
         """动态生成随机LEO卫星轨道"""
         # 基础参数围绕典型LEO轨道波动
         base_alt = 6871  # 约500km高度
-        import random
         
         # 随机分布参数以避免重叠
-        altitude = base_alt + random.uniform(-50, 50)
-        raan = random.uniform(0, 360)        # 升交点赤经随机
-        mean_anomaly = random.uniform(0, 360) # 平近点角随机
-        inclination = 97.4 + random.uniform(-1, 1) # 太阳同步轨道附近
+        altitude = base_alt + self.rng.uniform(-50, 50)
+        raan = self.rng.uniform(0, 360)        # 升交点赤经随机
+        mean_anomaly = self.rng.uniform(0, 360) # 平近点角随机
+        inclination = 97.4 + self.rng.uniform(-1, 1) # 太阳同步轨道附近
         
         return OrbitalElements(
             name=f"扩展卫星_{index}", 
@@ -1903,5 +1905,10 @@ class SimulationEngine:
             mean_anomaly=mean_anomaly
         )
 
-# 全局仿真引擎实例
-simulation_engine = SimulationEngine()
+def create_engine(seed=None, autostart=True):
+    """工厂：创建引擎实例，可注入随机种子以保证可复现；autostart 控制是否启动后台线程。"""
+    rng = random.Random(seed) if seed is not None else random.Random()
+    return SimulationEngine(rng=rng, autostart=autostart)
+
+
+# 注意：导入 backend.core 不再自动创建实例或启动线程；由工厂在应用入口创建。
