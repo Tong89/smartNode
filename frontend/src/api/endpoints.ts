@@ -128,6 +128,23 @@ export function updateLeoSatellites(payload: UpdateLeoSatellitesPayload): Promis
   return apiClient.post<UpdateResourceResult>('/api/update_leo_satellites', payload);
 }
 
+// ── Playback / Historical Snapshot API ───────────────────────────────────────
+
+/** Snapshot of satellite positions at a given historical simulation time. */
+export interface SnapshotAt {
+  t: number;
+  satellites: Array<{ id: string; name: string; type: string; lat: number; lon: number; alt: number }>;
+  active_requests: string[];
+}
+
+/**
+ * GET /api/snapshot_at?t=<seconds> — Propagate all satellites to a historical time.
+ * Used by the time-playback feature to render situational replay.
+ */
+export function fetchSnapshotAt(t: number): Promise<SnapshotAt> {
+  return apiClient.get<SnapshotAt>(`/api/snapshot_at?t=${encodeURIComponent(t)}`);
+}
+
 // ── Scenario API ─────────────────────────────────────────────────────────────
 
 /**
