@@ -12,6 +12,7 @@ import type {
   ResourceUtilization,
   ScenarioData,
   ScenarioRestoreResult,
+  ResourceTimeline,
 } from '../types/api';
 
 // ── Payload types for write endpoints ───────────────────────────────────────
@@ -94,6 +95,15 @@ export function fetchResourceStatus(): Promise<Record<string, unknown>> {
  */
 export function fetchResourceUtilization(): Promise<ResourceUtilization> {
   return apiClient.get<ResourceUtilization>('/api/resource_utilization');
+}
+
+/**
+ * GET /api/resource_timeline — Resource occupancy timeline data.
+ * Returns per-resource event intervals (start/end/status/data_type/priority)
+ * covering a 1-hour sliding window ending at current simulation time.
+ */
+export function fetchResourceTimeline(): Promise<ResourceTimeline> {
+  return apiClient.get<ResourceTimeline>('/api/resource_timeline');
 }
 
 /**

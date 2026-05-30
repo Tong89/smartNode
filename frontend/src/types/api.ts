@@ -95,3 +95,33 @@ export interface ScenarioRestoreResult {
   ground_station_count: number;
   leo_satellite_count: number;
 }
+
+/** 单条资源占用事件（来自 /api/resource_timeline） */
+export interface TimelineEvent {
+  request_id: string;
+  start: number;
+  end: number;
+  status: 'transmitting' | 'completed';
+  data_type: string;
+  data_size: number;
+  priority: number;
+  source: string;
+  progress: number;
+}
+
+/** 单个资源的时间轴信息 */
+export interface TimelineResource {
+  name: string;
+  type: string;
+  antenna?: string;
+  events: TimelineEvent[];
+}
+
+/** /api/resource_timeline 的完整响应结构 */
+export interface ResourceTimeline {
+  current_time: number;
+  time_range: [number, number];
+  satellites: Record<string, TimelineResource>;
+  ground_stations: Record<string, TimelineResource>;
+  geo_relays: Record<string, TimelineResource>;
+}

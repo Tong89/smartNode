@@ -9,7 +9,7 @@
  */
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { SystemData, Satellite, GroundStation, GeoRelay, TransmissionRequest } from '../types/api';
+import type { SystemData, Satellite, GroundStation, GeoRelay, TransmissionRequest, ResourceTimeline } from '../types/api';
 import { apiClient } from '../api/client';
 import {
   fetchHealth,
@@ -17,6 +17,7 @@ import {
   fetchSystemInfo,
   fetchResourceStatus,
   fetchResourceUtilization,
+  fetchResourceTimeline,
   submitRequest as apiSubmitRequest,
   updateGroundStations as apiUpdateGroundStations,
   updateLeoSatellites as apiUpdateLeoSatellites,
@@ -58,6 +59,8 @@ export const useSimulationStore = defineStore('simulation', () => {
   const systemInfo = ref<Record<string, unknown>>({});
   const resourceStatus = ref<Record<string, unknown>>({});
   const utilization = ref<Record<string, unknown>>({});
+
+  const resourceTimeline = ref<ResourceTimeline | null>(null);
 
   let pollingTimer: ReturnType<typeof window.setInterval> | null = null;
 
@@ -133,12 +136,13 @@ export const useSimulationStore = defineStore('simulation', () => {
     if (refreshing.value) return;
     refreshing.value = true;
     try {
-      const [health, data, info, status] = await Promise.allSettled([
+      const [health, data, info, status, _util, timeline] = await Promise.allSettled([
         fetchHealth(),
         fetchData(),
         fetchSystemInfo(),
         fetchResourceStatus(),
         fetchResourceUtilization(),
+        fetchResourceTimeline(),
       ]);
 
       backendOnline.value = health.status === 'fulfilled';
@@ -160,6 +164,10 @@ export const useSimulationStore = defineStore('simulation', () => {
 
       if (status.status === 'fulfilled') {
         resourceStatus.value = status.value || {};
+      }
+
+      if (timeline.status === 'fulfilled') {
+        resourceTimeline.value = timeline.value || null;
       }
     } catch {
       backendOnline.value = false;
@@ -230,6 +238,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     systemInfo,
     resourceStatus,
     utilization,
+    resourceTimeline,
     // getters
     systemTime,
     formattedTime,
