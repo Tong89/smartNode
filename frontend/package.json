@@ -9,6 +9,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
@@ -26,6 +29,7 @@
     "@vue/test-utils": "^2.4.0",
     "jsdom": "^25.0.0",
     "typescript": "^5.5.0",
-    "vue-tsc": "^2.1.0"
+    "vue-tsc": "^2.1.0",
+    "@playwright/test": "^1.48.0"
   }
 }
