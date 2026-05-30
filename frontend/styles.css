@@ -324,6 +324,79 @@ button:disabled {
   background: #f0c76b;
 }
 
+/* Coverage-layer legend swatches */
+.legend-ellipse {
+  display: inline-block;
+  width: 16px;
+  height: 8px;
+  border-radius: 50%;
+  border-width: 1.5px;
+  border-style: solid;
+}
+
+.legend-ellipse.sat-cov-legend {
+  background: rgba(245, 166, 35, 0.20);
+  border-color: rgba(245, 166, 35, 0.70);
+}
+
+.legend-ellipse.geo-cov-legend {
+  background: rgba(126, 200, 227, 0.18);
+  border-color: rgba(126, 200, 227, 0.65);
+}
+
+/* Coverage legend dots (used inside the toggle button) */
+.legend-dot.sat-cov {
+  background: rgba(245, 166, 35, 0.70);
+}
+
+.legend-dot.geo-cov {
+  background: rgba(126, 200, 227, 0.65);
+}
+
+/* Layer controls overlay (top-right of the Cesium map) */
+.map-layer-controls {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2;
+}
+
+.layer-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(31, 43, 45, 0.72);
+  color: rgba(247, 251, 250, 0.70);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s, border-color 0.18s;
+  backdrop-filter: blur(6px);
+}
+
+.layer-toggle-btn:hover {
+  background: rgba(31, 43, 45, 0.90);
+  color: #f7fbfa;
+  border-color: rgba(255, 255, 255, 0.48);
+}
+
+.layer-toggle-btn--active {
+  background: rgba(44, 62, 66, 0.85);
+  color: #f7fbfa;
+  border-color: rgba(245, 166, 35, 0.60);
+}
+
+.layer-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .inspector {
   min-width: 0;
   min-height: 0;

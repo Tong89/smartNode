@@ -44,6 +44,9 @@ const app = Vue.createApp({
       _trackIndex: {},
       _tracksLoading: false,
       _tracksLastRefresh: 0,  // 上次刷新轨迹的仿真时刻（用于节流）
+      // 覆盖足迹索引：entityId -> Cesium.Entity（LEO 覆盖足迹圆 & GEO 中继可见性圈）
+      _coverageIndex: {},
+      showCoverage: true,     // 覆盖图层开关（true = 显示）
       systemData: {},
       systemInfo: {},
       resourceStatus: {},
@@ -218,6 +221,7 @@ const app = Vue.createApp({
     this._entityIndex = {};
     this._linkIndex = {};
     this._trackIndex = {};
+    this._coverageIndex = {};
   },
 
   methods: {
@@ -631,6 +635,9 @@ const app = Vue.createApp({
         }
       }
 
+      // ── 覆盖足迹与可见性圈 ────────────────────────────────────────
+      this.updateCoverageFootprints();
+
       this.viewer.scene.requestRender();
 
       // 轨道轨迹节流刷新：每隔约半个轨道周期（或首次）才重新采样
@@ -835,6 +842,123 @@ const app = Vue.createApp({
         console.warn('轨道轨迹加载失败:', e.message || e);
       } finally {
         this._tracksLoading = false;
+      }
+    },
+
+    /**
+     * 根据卫星/中继高度和最小仰角计算地面覆盖半径（米）。
+     *
+     * 几何关系（球形地球）：
+     *   R_E  — 地球半径 6371 km
+     *   h    — 卫星高度（米）
+     *   ε    — 最小仰角（度）
+     *
+     *   天底角 ρ：cos(ρ) = R_E / (R_E + h)
+     *   地心角 λ = 90° − ε − ρ
+     *   地面覆盖半径 = R_E × λ（弧度制）
+     */
+    computeCoverageRadius(altitudeM, minElevationDeg) {
+      const R_E = 6371000;
+      const h = Math.max(altitudeM || 0, 0);
+      const cosNadir = R_E / (R_E + h);
+      const nadirRad = Math.acos(Math.min(1, cosNadir));
+      const minElRad = (minElevationDeg * Math.PI) / 180;
+      const earthCentralAngleRad = Math.max(0, Math.PI / 2 - minElRad - nadirRad);
+      return R_E * earthCentralAngleRad;
+    },
+
+    /**
+     * 新增或更新一个贴地覆盖圆（椭圆）实体。
+     * 复用已有实体（按 entityId 索引），仅在首次添加时创建；后续仅更新位置与半径。
+     */
+    upsertCoverageEllipse(entityId, lat, lon, radiusM, fillColor, strokeColor) {
+      if (!this.viewer || !window.Cesium) return;
+      const r = Math.max(10000, radiusM);
+      const position = this.toCartesian(lon, lat, 0);
+
+      if (this._coverageIndex[entityId]) {
+        const entity = this._coverageIndex[entityId];
+        entity.position = position;
+        entity.ellipse.semiMajorAxis = r;
+        entity.ellipse.semiMinorAxis = r;
+        entity.ellipse.show = this.showCoverage;
+      } else {
+        const entity = this.viewer.entities.add({
+          id: entityId,
+          position,
+          ellipse: {
+            semiMajorAxis: r,
+            semiMinorAxis: r,
+            material: fillColor,
+            outline: true,
+            outlineColor: strokeColor,
+            outlineWidth: 1.5,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            show: this.showCoverage,
+          },
+        });
+        this._coverageIndex[entityId] = entity;
+      }
+    },
+
+    /**
+     * 更新所有 LEO 卫星覆盖足迹圆与 GEO 中继可见性圈。
+     * 复用已有实体；仅在节点消失时移除对应实体。
+     */
+    updateCoverageFootprints() {
+      if (!this.viewer || !window.Cesium) return;
+
+      const leoCoverageColor = Cesium.Color.fromCssColorString('#f5a623').withAlpha(0.13);
+      const leoStrokeColor = Cesium.Color.fromCssColorString('#f5a623').withAlpha(0.55);
+      const geoCoverageColor = Cesium.Color.fromCssColorString('#7ec8e3').withAlpha(0.10);
+      const geoStrokeColor = Cesium.Color.fromCssColorString('#7ec8e3').withAlpha(0.50);
+
+      const liveCoverageIds = new Set();
+
+      // LEO 卫星覆盖足迹
+      this.satellites
+        .filter((sat) => sat.type === 'LEO')
+        .forEach((sat) => {
+          const eid = `leo-cov-${sat.id}`;
+          liveCoverageIds.add(eid);
+          const minEl = sat.min_elevation != null ? sat.min_elevation : 10;
+          const radius = this.computeCoverageRadius(sat.alt, minEl);
+          this.upsertCoverageEllipse(eid, sat.lat, sat.lon, radius, leoCoverageColor, leoStrokeColor);
+        });
+
+      // GEO 中继可见性圈
+      this.geoRelays.forEach((relay) => {
+        const eid = `geo-vis-${relay.id}`;
+        liveCoverageIds.add(eid);
+        const relayLat = relay.lat != null ? relay.lat : 0;
+        const relayAlt = relay.alt != null ? relay.alt : 35786000;
+        const minEl = relay.coverage_min_elevation != null ? relay.coverage_min_elevation : 10;
+        const radius = this.computeCoverageRadius(relayAlt, minEl);
+        this.upsertCoverageEllipse(eid, relayLat, relay.lon, radius, geoCoverageColor, geoStrokeColor);
+      });
+
+      // 移除已消失节点的覆盖实体
+      for (const eid of Object.keys(this._coverageIndex)) {
+        if (!liveCoverageIds.has(eid)) {
+          this.viewer.entities.remove(this._coverageIndex[eid]);
+          delete this._coverageIndex[eid];
+        }
+      }
+    },
+
+    /**
+     * 切换覆盖足迹图层的显示/隐藏状态。
+     * 更新所有已注册覆盖实体的 show 属性，并触发重绘。
+     */
+    toggleCoverageLayer() {
+      this.showCoverage = !this.showCoverage;
+      for (const entity of Object.values(this._coverageIndex)) {
+        if (entity.ellipse) {
+          entity.ellipse.show = this.showCoverage;
+        }
+      }
+      if (this.viewer && this.cesiumReady) {
+        this.viewer.scene.requestRender();
       }
     },
 
