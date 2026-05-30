@@ -2057,12 +2057,7 @@ class SimulationEngine:
                     
                     if self.check_visibility(geo_pos, gs, min_elevation=5):
                         return True, None
-                    gs_id = gs.get("id") if isinstance(gs, dict) else gs.station_id
-                    if gs_id in self.resource_usage["ground_stations"] and len(self.resource_usage["ground_stations"][gs_id]) > 0:
-                        continue
-                    if self.check_visibility(geo_pos, gs, min_elevation=5):
-                        return True, None
-        
+
         # 策略3: 对于原始影像(RAW_IMAGE)等数据,预测未来过境机会
         # 基于卫星轨道特征,在max_delay时间内预测是否会有过境机会
         if req.data_type == "RAW_IMAGE" or "direct" in data_config.get("allowed_links", []):
