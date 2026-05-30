@@ -2169,6 +2169,7 @@ class SimulationEngine:
         # GEO中继星
         for geo in geo_relays:
             pos = self.get_geo_position(geo)
+            coverage = geo.get("coverage", {})
             data["geo_relays"].append({
                 "id": geo["id"],
                 "name": geo["name"],
@@ -2177,7 +2178,9 @@ class SimulationEngine:
                 "alt": pos["alt"],
                 "antenna": geo["antenna"],
                 "beams": geo["beams"],
-                "bandwidth": geo["bandwidth"]
+                "bandwidth": geo["bandwidth"],
+                "coverage_fov": coverage.get("fov", 120),
+                "coverage_min_elevation": coverage.get("min_elevation", 10),
             })
         
         # 地面站

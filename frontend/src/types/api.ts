@@ -22,6 +22,8 @@ export interface Satellite {
   lon: number;
   alt: number;
   orbit_period?: number;
+  /** Minimum elevation angle (degrees) for visibility — used to compute coverage radius */
+  min_elevation?: number;
 }
 
 export interface GroundStation {
@@ -37,7 +39,13 @@ export interface GeoRelay {
   id: string;
   name: string;
   lon: number;
+  lat?: number;
+  alt?: number;
   bandwidth?: number;
+  /** Field-of-view half-angle (degrees) for GEO relay coverage ring */
+  coverage_fov?: number;
+  /** Minimum elevation angle (degrees) for GEO relay visibility ring */
+  coverage_min_elevation?: number;
 }
 
 export interface TransmissionRequest {
