@@ -22,6 +22,8 @@ from backend.config import (
     RESOURCE_TIGHT_THRESHOLD as CFG_RESOURCE_TIGHT_THRESHOLD,
 )
 from backend.physics.coordinates import ecef_to_lla, eci_to_ecef, lla_to_ecef
+from backend import orbit
+from backend.orbit import OrbitalElements, calc_central_angle
 from backend.scheduling.handover import HandoverController
 
 logger = logging.getLogger("smartnode")
@@ -41,17 +43,6 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
-
-
-def calc_central_angle(lat1, lon1, lat2, lon2):
-    """计算球面大圆地心角 (Degrees)"""
-    rad = math.pi / 180.0
-    phi1, phi2 = lat1 * rad, lat2 * rad
-    dphi = (lat2 - lat1) * rad
-    dlam = (lon2 - lon1) * rad
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return c * 180.0 / math.pi
 
 
 # ==========================================
@@ -122,104 +113,6 @@ CHINA_GROUND_STATIONS = [
 # ==========================================
 # 2. 卫星轨道配置 (轨道六根数)
 # ==========================================
-class OrbitalElements:
-    """轨道六根数定义 - 用于精确计算卫星位置"""
-
-    def __init__(self, name, sat_id,
-                 semi_major_axis,  # 半长轴 (km)
-                 eccentricity,  # 偏心率
-                 inclination,  # 轨道倾角 (度)
-                 raan,  # 升交点赤经 (度)
-                 arg_perigee,  # 近地点幅角 (度)
-                 mean_anomaly,  # 平近点角 (度)
-                 epoch=None):  # 历元时间
-        self.name = name
-        self.sat_id = sat_id
-        self.a = semi_major_axis
-        self.e = eccentricity
-        self.i = inclination
-        self.raan = raan
-        self.omega = arg_perigee
-        self.M0 = mean_anomaly
-        self.epoch = epoch or datetime.now()
-
-        # 地球引力常数 (km³/s²)
-        self.mu = 398600.4418
-        # 地球半径 (km)
-        self.R_earth = 6371.0
-
-    def get_mean_motion(self):
-        """计算平均角速度 (rad/s)"""
-        return math.sqrt(self.mu / (self.a ** 3))
-
-    def get_orbital_period(self):
-        """计算轨道周期 (秒)"""
-        return 2 * math.pi * math.sqrt((self.a ** 3) / self.mu)
-
-    def get_altitude(self):
-        """获取轨道高度 (米)"""
-        return (self.a - self.R_earth) * 1000
-
-    def propagate(self, current_time):
-        """
-        根据当前时间计算卫星位置 (简化的二体问题)
-        参数: current_time - 秒数或datetime对象
-        返回: (lat, lon, alt) 纬度(度), 经度(度), 高度(米)
-        """
-        if isinstance(current_time, datetime):
-            dt_seconds = (current_time - self.epoch).total_seconds()
-        else:
-            dt_seconds = current_time
-
-        # 计算当前平近点角
-        n = self.get_mean_motion()
-        M = math.radians(self.M0) + n * dt_seconds
-        M = M % (2 * math.pi)
-
-        # 解开普勒方程 (迭代法求偏近点角E)
-        E = M
-        for _ in range(10):
-            E = M + self.e * math.sin(E)
-
-        # 计算真近点角
-        nu = 2 * math.atan2(
-            math.sqrt(1 + self.e) * math.sin(E / 2),
-            math.sqrt(1 - self.e) * math.cos(E / 2)
-        )
-
-        # 计算轨道面内坐标
-        r = self.a * (1 - self.e * math.cos(E))
-
-        # 轨道面内位置
-        x_orb = r * math.cos(nu)
-        y_orb = r * math.sin(nu)
-
-        # 转换到地心惯性坐标系
-        cos_O = math.cos(math.radians(self.raan))
-        sin_O = math.sin(math.radians(self.raan))
-        cos_i = math.cos(math.radians(self.i))
-        sin_i = math.sin(math.radians(self.i))
-        cos_w = math.cos(math.radians(self.omega))
-        sin_w = math.sin(math.radians(self.omega))
-
-        # 地心惯性坐标 (ECI)
-        x = (cos_O * cos_w - sin_O * sin_w * cos_i) * x_orb + \
-            (-cos_O * sin_w - sin_O * cos_w * cos_i) * y_orb
-        y = (sin_O * cos_w + cos_O * sin_w * cos_i) * x_orb + \
-            (-sin_O * sin_w + cos_O * cos_w * cos_i) * y_orb
-        z = (sin_w * sin_i) * x_orb + (cos_w * sin_i) * y_orb
-
-        # 地球自转修正 (地球自转角速度 7.292115e-5 rad/s)
-        omega_earth = 7.292115e-5
-        theta = omega_earth * dt_seconds
-
-        # ECI -> ECEF -> LLA（WGS-84 椭球），替代球面近似
-        x_ecef, y_ecef, z_ecef = eci_to_ecef(x, y, z, theta)
-        lat, lon, alt = ecef_to_lla(x_ecef, y_ecef, z_ecef)
-
-        return lat, lon, alt
-
-
 # ==========================================
 # 2.3 LEO卫星天线配置 ⭐ 新增
 # ==========================================
@@ -1606,36 +1499,10 @@ class SimulationEngine:
         return {"lat": 0, "lon": geo_relay["lon"], "alt": 35786000}
     
     def check_visibility(self, sat_pos, gs_pos, min_elevation=10):
-        """检查卫星与地面站的可见性"""
-        # 计算中心角
-        angle = calc_central_angle(sat_pos["lat"], sat_pos["lon"], gs_pos["lat"], gs_pos["lon"])
-        
-        # 地球半径(公里)
-        R = 6371.0
-        h = sat_pos["alt"] / 1000.0  # 转换为公里
-        
-        # 计算地面距离(公里)
-        d = R * math.radians(angle)
-        
-        # 计算仰角
-        if d < 0.001:  # 接近正上方
-            elevation = 90.0
-        else:
-            # 使用余弦定理计算卫星到地面站的直线距离
-            slant_range = math.sqrt(R*R + (R+h)*(R+h) - 2*R*(R+h)*math.cos(math.radians(angle)))
-            # 计算仰角
-            elevation = math.degrees(math.asin((R+h)*math.sin(math.radians(angle))/slant_range)) - angle
-        
-        return elevation >= min_elevation
+        return orbit.check_visibility(sat_pos, gs_pos, min_elevation)
     
     def check_geo_visibility(self, leo_pos, geo_pos):
-        """检查LEO卫星与GEO中继星的可见性"""
-        angle = calc_central_angle(leo_pos["lat"], leo_pos["lon"], geo_pos["lat"], geo_pos["lon"])
-        visible = angle < 80
-        # ⭐ 调试日志 - 可注释掉
-        # if visible:
-        #     print(f"   GEO @ {geo_pos['lon']}° 可见 LEO @ ({leo_pos['lat']:.1f}°, {leo_pos['lon']:.1f}°), 角度: {angle:.1f}°")
-        return visible
+        return orbit.check_geo_visibility(leo_pos, geo_pos)
     
     def _resource_busy_by_other(self, resource_type, resource_id, req_id):
         return any(
@@ -2464,74 +2331,16 @@ class SimulationEngine:
 
     
     def _calculate_direct_rate(self, sat_pos, gs, data_type=None):
-        """计算直连链路速率 (Mbps)"""
-        angle = calc_central_angle(sat_pos["lat"], sat_pos["lon"], gs["lat"], gs["lon"])
-        distance = math.sqrt((sat_pos["alt"] / 1000) ** 2 + (6371 * math.sin(math.radians(angle))) ** 2)
-        
-        if gs["antenna_type"] == "Ka":
-            base_rate = 200  # ⭐ 降低基础速率 800->200
-        else:
-            base_rate = 100  # ⭐ 降低基础速率 300->100
-        
-        rate = base_rate * math.exp(-distance / 10000)
-        
-        # ⭐ 原始影像传输速率
-        if data_type == "RAW_IMAGE":
-            rate = rate * 0.6
-        
-        return max(rate, 5)  # ⭐ 降低最小速率
+        return orbit.calculate_direct_rate(sat_pos, gs, data_type)
     
     def _calculate_relay_rate(self, sat_pos, geo_pos, gs, data_type=None):
-        """计算中继链路速率 (Mbps)"""
-        # LEO到GEO
-        angle1 = calc_central_angle(sat_pos["lat"], sat_pos["lon"], geo_pos["lat"], geo_pos["lon"])
-        dist1 = math.sqrt((geo_pos["alt"] - sat_pos["alt"]) ** 2 / 1e12 + (6371 * math.sin(math.radians(angle1))) ** 2)
-        rate1 = 500 * math.exp(-dist1 / 50000)  # ⭐ 降低速率 3000->500
-        
-        # GEO到地面站
-        angle2 = calc_central_angle(geo_pos["lat"], geo_pos["lon"], gs["lat"], gs["lon"])
-        dist2 = math.sqrt((geo_pos["alt"] / 1000) ** 2 + (6371 * math.sin(math.radians(angle2))) ** 2)
-        rate2 = 400 * math.exp(-dist2 / 40000)  # ⭐ 降低速率 2000->400
-        
-        rate = min(rate1, rate2)
-        
-        # ⭐ 原始影像传输速率
-        if data_type == "RAW_IMAGE":
-            rate = rate * 0.6
-        
-        return max(rate, 5)  # ⭐ 降低最小速率
+        return orbit.calculate_relay_rate(sat_pos, geo_pos, gs, data_type)
     
     def _calculate_inter_satellite_rate(self, geo1_pos, geo2_pos):
-        """计算GEO星间链路速率 (Mbps)"""
-        angle = calc_central_angle(geo1_pos["lat"], geo1_pos["lon"], geo2_pos["lat"], geo2_pos["lon"])
-        # GEO之间的距离
-        dist = 2 * geo1_pos["alt"] / 1000 * math.sin(math.radians(angle) / 2)
-        # 星间链路通常使用激光通信,速率较高
-        rate = 2000 * math.exp(-dist / 40000)
-        return max(rate, 100)
+        return orbit.calculate_inter_satellite_rate(geo1_pos, geo2_pos)
     
     def _calculate_multi_hop_relay_rate(self, sat_pos, geo1_pos, geo2_pos, gs, data_type=None):
-        """计算多跳中继链路速率 (Mbps) - LEO→GEO1→GEO2→地面站"""
-        # LEO到GEO1
-        angle1 = calc_central_angle(sat_pos["lat"], sat_pos["lon"], geo1_pos["lat"], geo1_pos["lon"])
-        dist1 = math.sqrt((geo1_pos["alt"] - sat_pos["alt"]) ** 2 / 1e12 + (6371 * math.sin(math.radians(angle1))) ** 2)
-        rate1 = 1500 * math.exp(-dist1 / 30000)
-        
-        # GEO1到GEO2 (星间链路)
-        rate2 = self._calculate_inter_satellite_rate(geo1_pos, geo2_pos)
-        
-        # GEO2到地面站
-        angle3 = calc_central_angle(geo2_pos["lat"], geo2_pos["lon"], gs["lat"], gs["lon"])
-        dist3 = math.sqrt((geo2_pos["alt"] / 1000) ** 2 + (6371 * math.sin(math.radians(angle3))) ** 2)
-        rate3 = 1000 * math.exp(-dist3 / 20000)
-        
-        rate = min(rate1, rate2, rate3)
-        
-        # ⭐ 优化：原始影像多跳中继速率从12%提升到50%
-        if data_type == "RAW_IMAGE":
-            rate = rate * 0.5  # 多跳稍慢于直连，但仍然可用
-        
-        return rate
+        return orbit.calculate_multi_hop_relay_rate(sat_pos, geo1_pos, geo2_pos, gs, data_type)
     
     def update_ground_station_count(self, new_count):
         """更新地面站数量"""
