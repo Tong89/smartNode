@@ -12,3 +12,6 @@ black>=24.0,<25.0
 
 # Static type checking
 mypy>=1.10,<2.0
+
+# Load / stress testing
+locust>=2.20,<3.0
