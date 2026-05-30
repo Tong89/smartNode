@@ -18,7 +18,7 @@ from backend.auth import (
     decode_token,
     init_auth,
 )
-from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH, debug_api_enabled, validate_config
+from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH, debug_api_enabled, validate_config, get_bind_host, get_bind_port
 from backend.envelope import ok
 from backend.openapi import OPENAPI_SPEC, SWAGGER_HTML
 from backend.errors import error_response, register_error_handlers
@@ -805,16 +805,25 @@ def _register_v1_aliases():
 _register_v1_aliases()
 
 
-def run(host='127.0.0.1', port=5000, debug=False):
+def run(host: str | None = None, port: int | None = None, debug: bool = False) -> None:
+    """启动 Flask 开发服务器。
+
+    host / port 优先使用调用方传入的值；未传入时读取环境变量
+    （SMARTNODE_HOST / SMARTNODE_PORT），最终回退到历史默认值。
+    """
+    _host = host if host is not None else get_bind_host()
+    _port = port if port is not None else get_bind_port()
     validate_config()  # 生产模式下缺失必填密钥即拒启
     simulation_engine.reset_requests()
-    app.run(debug=debug, host=host, port=port, use_reloader=False, threaded=True)
+    app.run(debug=debug, host=_host, port=_port, use_reloader=False, threaded=True)
 
 
 if __name__ == '__main__':
     print('=' * 60)
     print('天基智枢 SmartNode 仿真平台启动中...')
-    print('访问地址: http://127.0.0.1:5000/frontend/')
+    _h = get_bind_host()
+    _p = get_bind_port()
+    print(f'访问地址: http://{_h}:{_p}/frontend/')
     print('=' * 60)
     try:
         run()

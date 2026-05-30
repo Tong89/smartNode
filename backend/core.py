@@ -26,6 +26,7 @@ from backend.config import (
     HANDOVER_MIN_ELEVATION,
     HANDOVER_RATE_RATIO,
     RESOURCE_TIGHT_THRESHOLD as CFG_RESOURCE_TIGHT_THRESHOLD,
+    get_time_scale as _cfg_get_time_scale,
 )
 from backend.physics.coordinates import ecef_to_lla, eci_to_ecef, lla_to_ecef
 from backend import orbit
@@ -218,7 +219,8 @@ logger.debug("Generated %d data type combinations", TOTAL_DATA_COMBINATIONS)
 # - TIME_SCALE = 10: 轨道平滑，易观察（推荐演示）
 # - TIME_SCALE = 60: 快速仿真，卫星看起来跳跃
 # - TIME_SCALE = 600: 极速仿真，用于长时间测试
-TIME_SCALE = 10  # 仿真速度，保持平滑动画
+# 通过环境变量 SMARTNODE_TIME_SCALE 可在不修改代码的情况下覆盖此值。
+TIME_SCALE = _cfg_get_time_scale()  # 从环境变量读取，默认 10
 
 # 地面站配置
 DEFAULT_GROUND_STATION_COUNT = 20  # 默认选择20个地面站
