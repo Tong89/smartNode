@@ -1,0 +1,147 @@
+/**
+ * themes.css — CSS custom property tokens for light and dark themes.
+ *
+ * Usage: `<html data-theme="light">` or `<html data-theme="dark">`.
+ * The composable `use-theme.ts` toggles the attribute and persists the
+ * choice to `localStorage` so the preference survives page refresh.
+ */
+
+/* ── Light theme (default) ────────────────────────────────────────────── */
+:root,
+[data-theme='light'] {
+  /* Surfaces */
+  --bg-base:       #f4f6fa;
+  --bg-surface:    #ffffff;
+  --bg-elevated:   #e8ecf4;
+  --bg-overlay:    rgba(0, 0, 0, 0.04);
+
+  /* Borders */
+  --border-subtle: #d5dae6;
+  --border-default: #b0baca;
+
+  /* Text */
+  --text-primary:   #1a1f2e;
+  --text-secondary: #4a5568;
+  --text-muted:     #8a97ab;
+  --text-inverse:   #ffffff;
+
+  /* Brand / accent */
+  --accent-primary:   #2563eb;
+  --accent-secondary: #0ea5e9;
+  --accent-hover:     #1d4ed8;
+
+  /* Status colours */
+  --color-success:  #16a34a;
+  --color-warning:  #d97706;
+  --color-error:    #dc2626;
+  --color-info:     #0ea5e9;
+
+  /* Interactive */
+  --btn-primary-bg:   #2563eb;
+  --btn-primary-text: #ffffff;
+  --btn-secondary-bg: #e8ecf4;
+  --btn-secondary-text: #1a1f2e;
+
+  /* Topbar */
+  --topbar-bg:     #1a2744;
+  --topbar-text:   #dce6f4;
+
+  /* Sidebar */
+  --sidebar-bg:    #1e2d50;
+  --sidebar-icon:  #8aa3cc;
+  --sidebar-active:#2563eb;
+
+  /* Inspector / panel */
+  --panel-bg:      #ffffff;
+  --panel-header:  #f0f3fa;
+
+  /* Skeleton / loading */
+  --skeleton-from: #e2e8f0;
+  --skeleton-to:   #cbd5e1;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.10);
+  --shadow-lg:  0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* ── Dark theme ──────────────────────────────────────────────────────── */
+[data-theme='dark'] {
+  /* Surfaces */
+  --bg-base:       #0d1117;
+  --bg-surface:    #161b22;
+  --bg-elevated:   #1f2937;
+  --bg-overlay:    rgba(255, 255, 255, 0.04);
+
+  /* Borders */
+  --border-subtle:  #2d3748;
+  --border-default: #4a5568;
+
+  /* Text */
+  --text-primary:   #e2e8f0;
+  --text-secondary: #a0aec0;
+  --text-muted:     #636e7f;
+  --text-inverse:   #1a1f2e;
+
+  /* Brand / accent */
+  --accent-primary:   #3b82f6;
+  --accent-secondary: #38bdf8;
+  --accent-hover:     #60a5fa;
+
+  /* Status colours */
+  --color-success:  #22c55e;
+  --color-warning:  #f59e0b;
+  --color-error:    #f87171;
+  --color-info:     #38bdf8;
+
+  /* Interactive */
+  --btn-primary-bg:    #3b82f6;
+  --btn-primary-text:  #ffffff;
+  --btn-secondary-bg:  #1f2937;
+  --btn-secondary-text:#e2e8f0;
+
+  /* Topbar */
+  --topbar-bg:     #0d1117;
+  --topbar-text:   #c9d5e8;
+
+  /* Sidebar */
+  --sidebar-bg:    #0d1117;
+  --sidebar-icon:  #637899;
+  --sidebar-active:#3b82f6;
+
+  /* Inspector / panel */
+  --panel-bg:      #161b22;
+  --panel-header:  #1f2937;
+
+  /* Skeleton / loading */
+  --skeleton-from: #1f2937;
+  --skeleton-to:   #2d3748;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.40);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.50);
+  --shadow-lg:  0 8px 24px rgba(0, 0, 0, 0.60);
+}
+
+/* ── Skeleton animation ───────────────────────────────────────────────── */
+@keyframes skeleton-pulse {
+  0%   { background-color: var(--skeleton-from); }
+  50%  { background-color: var(--skeleton-to); }
+  100% { background-color: var(--skeleton-from); }
+}
+
+.skeleton {
+  border-radius: 4px;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+/* ── Smooth theme transitions ─────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  transition:
+    background-color 0.22s ease,
+    border-color     0.22s ease,
+    color            0.22s ease,
+    box-shadow       0.22s ease;
+}
