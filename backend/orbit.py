@@ -20,7 +20,11 @@ from backend.physics.propagator import (
     j2_arg_perigee_rate,
     j2_mean_anomaly_rate_correction,
 )
-from backend.physics.geometry import check_visibility_enu, check_geo_visibility_enu
+from backend.physics.geometry import (
+    check_visibility_enu,
+    check_geo_visibility_enu,
+    compute_look_angles,
+)
 from backend.comms.link_budget import (
     link_budget_direct,
     link_budget_relay,
@@ -295,41 +299,82 @@ def _slant_range_km(sat_pos, target_pos) -> float:
 
 
 def calculate_direct_rate(sat_pos, gs, data_type=None):
-    """直连���路速率 (Mbps)，由链路预算引擎驱动。
+    """直连链路速率 (Mbps)，由链路预算引擎驱动（含大气衰减）。
 
     替代原 base_rate × exp(-d/k) 经验公式，
-    使用 FSPL/EIRP/G-T/C-N0 推导物理上准确的可达速率。
+    使用 FSPL/EIRP/G-T/C-N0 推导物理上准确的可达速率；
+    通过仰角与地面站降雨率叠加 ITU-R P.838/P.618 大气衰减。
     """
-    dist_km = _slant_range_km(sat_pos, {
-        "lat": gs["lat"],
-        "lon": gs["lon"],
-        "alt": 0.0,
-    })
+    gs_lat = gs["lat"]
+    gs_lon = gs["lon"]
+    gs_alt_m = gs.get("alt", 0.0)
+    sat_alt_m = sat_pos.get("alt", 500e3)
+
+    # 精确计算仰角（用于大气衰减路径折算）
+    look = compute_look_angles(
+        sat_lat=sat_pos["lat"],
+        sat_lon=sat_pos["lon"],
+        sat_alt_m=sat_alt_m,
+        gs_lat=gs_lat,
+        gs_lon=gs_lon,
+        gs_alt_m=gs_alt_m,
+    )
+    elevation_deg = look["elevation_deg"]
+    dist_km = look["slant_range_km"] if look["slant_range_km"] > 0 else _slant_range_km(
+        sat_pos, {"lat": gs_lat, "lon": gs_lon, "alt": gs_alt_m}
+    )
+
     antenna_type = gs.get("antenna_type", "Ka")
+    # 地面站可配置降雨率场景（默认晴天）
+    rainfall_rate_mm_h = gs.get("rainfall_rate_mm_h", 0.0)
+    gs_altitude_km = gs_alt_m / 1000.0
+
     result = link_budget_direct(
         distance_km=dist_km,
         antenna_type=antenna_type,
         data_type=data_type,
+        elevation_deg=elevation_deg,
+        rainfall_rate_mm_h=rainfall_rate_mm_h,
+        gs_altitude_km=gs_altitude_km,
     )
     return max(result.achievable_rate_mbps, 5.0)
 
 
 def calculate_relay_rate(sat_pos, geo_pos, gs, data_type=None):
-    """单跳中继链路速率 (Mbps)，由链路预算引擎驱动。
+    """单跳中继链路速率 (Mbps)，由链路预算引擎驱动（含大气衰减）。
 
     分别计算 LEO→GEO 上行与 GEO→地面站下行的链路预算，
-    取瓶颈（可达速率最小）链路的速率。
+    取瓶颈（可达速率最小）链路的速率；GEO→地面站下行叠加大气衰减。
     """
     dist_leo_geo_km = _slant_range_km(sat_pos, geo_pos)
-    dist_geo_gs_km = _slant_range_km(geo_pos, {
-        "lat": gs["lat"],
-        "lon": gs["lon"],
-        "alt": 0.0,
-    })
+
+    # 计算 GEO 对地面站的仰角（用于下行大气衰减）
+    gs_lat = gs["lat"]
+    gs_lon = gs["lon"]
+    gs_alt_m = gs.get("alt", 0.0)
+    look_gs = compute_look_angles(
+        sat_lat=geo_pos["lat"],
+        sat_lon=geo_pos["lon"],
+        sat_alt_m=geo_pos.get("alt", 35786e3),
+        gs_lat=gs_lat,
+        gs_lon=gs_lon,
+        gs_alt_m=gs_alt_m,
+    )
+    elevation_deg_gs = look_gs["elevation_deg"]
+    dist_geo_gs_km = look_gs["slant_range_km"] if look_gs["slant_range_km"] > 0 else _slant_range_km(
+        geo_pos, {"lat": gs_lat, "lon": gs_lon, "alt": gs_alt_m}
+    )
+
+    rainfall_rate_mm_h = gs.get("rainfall_rate_mm_h", 0.0)
+    gs_altitude_km = gs_alt_m / 1000.0
+
     result = link_budget_relay(
         dist_leo_geo_km=dist_leo_geo_km,
         dist_geo_gs_km=dist_geo_gs_km,
         data_type=data_type,
+        elevation_deg_gs=elevation_deg_gs,
+        rainfall_rate_mm_h=rainfall_rate_mm_h,
+        gs_altitude_km=gs_altitude_km,
     )
     return max(result.achievable_rate_mbps, 5.0)
 
