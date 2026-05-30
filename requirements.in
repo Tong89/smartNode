@@ -8,3 +8,10 @@
 Flask>=3.0,<4.0
 PyJWT>=2.8,<3.0
 structlog>=24.1,<26.0
+
+# Observability: Prometheus metrics export
+prometheus-client>=0.20,<1.0
+
+# Observability: OpenTelemetry tracing (optional — gracefully degraded if absent)
+opentelemetry-sdk>=1.24,<2.0
+opentelemetry-instrumentation-flask>=0.45b0,<1.0
