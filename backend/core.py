@@ -45,6 +45,11 @@ from backend.scheduling.trace import (
     DecisionTraceBuffer,
     build_trace_from_link_selection,
 )
+from backend.comms.beam_pointing import (
+    BeamPointing,
+    from_geo_satellite,
+    from_opportunistic_station,
+)
 
 logger = logging.getLogger("smartnode")
 
@@ -408,6 +413,15 @@ class SimulationEngine:
 
         self.meo_satellites = MEO_SATELLITES
         self.geo_relays = GEO_RELAY_SATELLITES
+
+        # ⭐ 波束指向约束管理器（BeamPointing）
+        # 每个 GEO 中继星与随遇接入站各持有一个 BeamPointing 实例，
+        # 用于扫描范围校验、偏轴增益损耗计算与 max_beams 并发约束。
+        self._beam_managers: dict = {}
+        for geo in self.geo_relays:
+            self._beam_managers[geo["id"]] = from_geo_satellite(geo)
+        for opp in OPPORTUNISTIC_STATIONS:
+            self._beam_managers[opp["id"]] = from_opportunistic_station(opp)
 
         # 地面站列表 (从50个中随机选择指定数量)
         self.all_ground_stations = CHINA_GROUND_STATIONS
@@ -907,14 +921,17 @@ class SimulationEngine:
                                 for gs in self.ground_stations:
                                     if self.check_visibility(geo_pos, gs, min_elevation=5):
                                         if is_resource_available(satellite.sat_id, gs["id"], geo["id"]):
-                                            rate = self._calculate_relay_rate(sat_pos, geo_pos, gs, req.data_type)
+                                            rate = self._calculate_relay_rate(
+                                                sat_pos, geo_pos, gs, req.data_type,
+                                                geo_id=geo["id"],  # ⭐ 相控阵扫描约束
+                                            )
                                             if rate > best_rate:
                                                 best_rate = rate
                                                 best_method = "relay"
                                                 best_gs = gs["id"]
                                                 best_relay = geo["id"]
                                                 best_relay2 = None
-                        
+
                         # 3. 尝试双跳 (LEO -> GEO1 -> GEO2 -> GS)
                         if best_rate == 0:
                             for geo1 in self.geo_relays:
@@ -929,7 +946,8 @@ class SimulationEngine:
                                         if not self.check_visibility(geo2_pos, gs, min_elevation=5):
                                             continue
                                         rate = self._calculate_multi_hop_relay_rate(
-                                            sat_pos, geo1_pos, geo2_pos, gs, req.data_type
+                                            sat_pos, geo1_pos, geo2_pos, gs, req.data_type,
+                                            geo1_id=geo1["id"], geo2_id=geo2["id"],  # ⭐ 相控阵扫描约束
                                         )
                                         if rate > best_rate and is_resource_available(
                                             satellite.sat_id, gs["id"], geo1["id"], geo2["id"]
@@ -1719,7 +1737,10 @@ class SimulationEngine:
                         # 检查 GEO -> 地面站 可见性
                         for gs in available_ground_stations:  # ⭐ 使用用户选定的地面站列表
                             if self.check_visibility(geo_pos, gs, min_elevation=5):
-                                rate = self._calculate_relay_rate(sat_pos, geo_pos, gs, req.data_type)
+                                rate = self._calculate_relay_rate(
+                                    sat_pos, geo_pos, gs, req.data_type,
+                                    geo_id=geo["id"],  # ⭐ 相控阵扫描约束
+                                )
                                 # 对于TASK_CMD/INTEL，只检查中继带宽
                                 if is_immediate_type:
                                     if rate > 0 and self._check_relay_bandwidth_available(geo["id"], rate):
@@ -1753,7 +1774,8 @@ class SimulationEngine:
                             if not self.check_visibility(geo2_pos, gs, min_elevation=5):
                                 continue
                             rate = self._calculate_multi_hop_relay_rate(
-                                sat_pos, geo1_pos, geo2_pos, gs, req.data_type
+                                sat_pos, geo1_pos, geo2_pos, gs, req.data_type,
+                                geo1_id=geo1["id"], geo2_id=geo2["id"],  # ⭐ 相控阵扫描约束
                             )
                             if rate <= 0 or rate <= best_rate:
                                 continue
@@ -1931,17 +1953,93 @@ class SimulationEngine:
     def _release_resources(self, req_id):
         self._resources.release(req_id)
 
+    def _get_beam_manager(self, node_id: str) -> "BeamPointing | None":
+        """返回站点/卫星对应的 BeamPointing 管理器（不存在则返回 None）。"""
+        return self._beam_managers.get(node_id)
+
+    def _check_beam_pointing(self, node_id: str, sat_pos: dict, node_pos: dict) -> bool:
+        """检查 node_id 对应的相控阵天线是否可以指向 sat_pos（从 node 角度看卫星）。
+
+        计算卫星相对节点（GEO 或随遇站）的仰角和方位角，然后检查：
+        - 目标是否在扫描范围内；
+        - 当前活跃波束数是否未达上限。
+
+        Returns True 当波束可用，False 时该链路被拒绝。
+        """
+        bm = self._get_beam_manager(node_id)
+        if bm is None:
+            return True  # 无约束管理器，不限制
+        look = compute_look_angles(
+            sat_lat=node_pos["lat"],
+            sat_lon=node_pos["lon"],
+            sat_alt_m=node_pos.get("alt", 0.0),
+            gs_lat=sat_pos["lat"],
+            gs_lon=sat_pos["lon"],
+            gs_alt_m=sat_pos.get("alt", 500e3),
+        )
+        az = look["azimuth_deg"]
+        el = look["elevation_deg"]
+        result = bm.check(azimuth_deg=az, elevation_deg=el)
+        return result.is_available
+
+    def _beam_scan_loss_factor(self, node_id: str, sat_pos: dict, node_pos: dict) -> float:
+        """返回 node_id 天线指向 sat_pos 时的扫描损耗因子（线性，<=1.0）。
+
+        若无约束管理器或目标超出范围则返回 1.0（不施加额外损耗）。
+        """
+        bm = self._get_beam_manager(node_id)
+        if bm is None:
+            return 1.0
+        look = compute_look_angles(
+            sat_lat=node_pos["lat"],
+            sat_lon=node_pos["lon"],
+            sat_alt_m=node_pos.get("alt", 0.0),
+            gs_lat=sat_pos["lat"],
+            gs_lon=sat_pos["lon"],
+            gs_alt_m=sat_pos.get("alt", 500e3),
+        )
+        az = look["azimuth_deg"]
+        el = look["elevation_deg"]
+        return bm.apply_rate(1.0, az, el)
+
     def _calculate_direct_rate(self, sat_pos, gs, data_type=None):
         return orbit.calculate_direct_rate(sat_pos, gs, data_type)
-    
-    def _calculate_relay_rate(self, sat_pos, geo_pos, gs, data_type=None):
-        return orbit.calculate_relay_rate(sat_pos, geo_pos, gs, data_type)
-    
+
+    def _calculate_relay_rate(self, sat_pos, geo_pos, gs, data_type=None, geo_id: str = None):
+        """单跳中继速率，叠加 GEO 天线偏轴扫描损耗。
+
+        若 geo_id 有对应的 BeamPointing 管理器，会：
+        1. 检查 LEO→GEO 方向是否在 GEO 天线扫描范围内；若不在则返回 0；
+        2. 将偏轴扫描损耗折算为速率衰减因子并施加到最终速率。
+        """
+        if geo_id is not None:
+            if not self._check_beam_pointing(geo_id, sat_pos, geo_pos):
+                return 0.0
+        base_rate = orbit.calculate_relay_rate(sat_pos, geo_pos, gs, data_type)
+        if geo_id is not None and base_rate > 0:
+            factor = self._beam_scan_loss_factor(geo_id, sat_pos, geo_pos)
+            base_rate = base_rate * factor
+        return base_rate
+
     def _calculate_inter_satellite_rate(self, geo1_pos, geo2_pos):
         return orbit.calculate_inter_satellite_rate(geo1_pos, geo2_pos)
-    
-    def _calculate_multi_hop_relay_rate(self, sat_pos, geo1_pos, geo2_pos, gs, data_type=None):
-        return orbit.calculate_multi_hop_relay_rate(sat_pos, geo1_pos, geo2_pos, gs, data_type)
+
+    def _calculate_multi_hop_relay_rate(self, sat_pos, geo1_pos, geo2_pos, gs, data_type=None,
+                                        geo1_id: str = None, geo2_id: str = None):
+        """多跳中继速率，叠加两个 GEO 天线的扫描约束与损耗。"""
+        if geo1_id is not None:
+            if not self._check_beam_pointing(geo1_id, sat_pos, geo1_pos):
+                return 0.0
+        if geo2_id is not None:
+            if not self._check_beam_pointing(geo2_id, sat_pos, geo2_pos):
+                return 0.0
+        base_rate = orbit.calculate_multi_hop_relay_rate(sat_pos, geo1_pos, geo2_pos, gs, data_type)
+        if base_rate > 0:
+            if geo1_id is not None:
+                base_rate *= self._beam_scan_loss_factor(geo1_id, sat_pos, geo1_pos)
+            if geo2_id is not None:
+                base_rate *= self._beam_scan_loss_factor(geo2_id, sat_pos, geo2_pos)
+        return base_rate
     
     def update_ground_station_count(self, new_count):
         """更新地面站数量"""
