@@ -5,6 +5,8 @@ import logging
 import os
 from pathlib import Path
 
+from backend.logging_config import get_logger
+
 from flask import Flask, jsonify, request, send_from_directory
 
 from flask import g
@@ -50,7 +52,7 @@ simulation_engine = create_engine(autostart=True)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = PROJECT_ROOT / 'frontend'
 
-logger = logging.getLogger("smartnode")
+logger = get_logger("smartnode.api")
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
@@ -817,6 +819,9 @@ if __name__ == '__main__':
     try:
         run()
     except Exception as e:
-        print(f'[FATAL] Flask 服务异常: {e}')
         import traceback
-        traceback.print_exc()
+        logger.error(
+            "Flask 服务启动异常",
+            error=str(e),
+            traceback=traceback.format_exc(),
+        )
