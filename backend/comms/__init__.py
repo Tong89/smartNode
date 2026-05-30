@@ -23,6 +23,13 @@ from .atmosphere import (
     total_atmospheric_loss_db,
     atmospheric_loss_for_link,
 )
+from .laser_isl import (
+    LaserISLModel,
+    LaserISLResult,
+    check_los_visibility,
+    laser_isl_rate,
+    laser_isl_check,
+)
 
 __all__ = [
     "LinkBudget",
@@ -40,4 +47,10 @@ __all__ = [
     "gaseous_attenuation_db",
     "total_atmospheric_loss_db",
     "atmospheric_loss_for_link",
+    # Laser ISL physics model
+    "LaserISLModel",
+    "LaserISLResult",
+    "check_los_visibility",
+    "laser_isl_rate",
+    "laser_isl_check",
 ]
