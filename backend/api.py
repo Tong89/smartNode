@@ -66,6 +66,9 @@ def submit_transmission_request():
     try:
         data = request.json
         result = simulation_engine.submit_request(data)
+        # 业务级错误（如指定卫星不存在）返回 4xx，便于前端区分客户端错误与服务端异常
+        if isinstance(result, dict) and result.get("status") == "error":
+            return jsonify(result), 400
         return jsonify(result)
     except Exception as e:
         import traceback
