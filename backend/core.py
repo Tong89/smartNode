@@ -1383,8 +1383,30 @@ class SimulationEngine:
                                                 best_relay = geo["id"]
                                                 best_relay2 = None
                         
-                        # 3. 尝试双跳
-                        # (此处略去双跳遍历以节省篇幅，逻辑同 start_transmission)
+                        # 3. 尝试双跳 (LEO -> GEO1 -> GEO2 -> GS)
+                        if best_rate == 0:
+                            for geo1 in self.geo_relays:
+                                geo1_pos = self.get_geo_position(geo1)
+                                if not self.check_geo_visibility(sat_pos, geo1_pos):
+                                    continue
+                                for geo2 in self.geo_relays:
+                                    if geo2["id"] == geo1["id"]:
+                                        continue
+                                    geo2_pos = self.get_geo_position(geo2)
+                                    for gs in self.ground_stations:
+                                        if not self.check_visibility(geo2_pos, gs, min_elevation=5):
+                                            continue
+                                        rate = self._calculate_multi_hop_relay_rate(
+                                            sat_pos, geo1_pos, geo2_pos, gs, req.data_type
+                                        )
+                                        if rate > best_rate and is_resource_available(
+                                            satellite.sat_id, gs["id"], geo1["id"], geo2["id"]
+                                        ):
+                                            best_rate = rate
+                                            best_method = "relay"
+                                            best_gs = gs["id"]
+                                            best_relay = geo1["id"]
+                                            best_relay2 = geo2["id"]
 
                     # 如果找到链路,开始传输
                     if best_rate > 0:
@@ -2216,7 +2238,39 @@ class SimulationEngine:
                                             best_gs = gs["id"]
                                             best_relay = geo["id"]
                                             best_relay2 = None
-            
+
+            # 第三步：若单跳中继仍不可达，尝试双跳中继 (LEO -> GEO1 -> GEO2 -> GS)
+            if best_rate == 0:
+                for geo1 in self.geo_relays:
+                    geo1_pos = self.get_geo_position(geo1)
+                    if not self.check_geo_visibility(sat_pos, geo1_pos):
+                        continue
+                    for geo2 in self.geo_relays:
+                        if geo2["id"] == geo1["id"]:
+                            continue
+                        geo2_pos = self.get_geo_position(geo2)
+                        for gs in available_ground_stations:
+                            if not self.check_visibility(geo2_pos, gs, min_elevation=5):
+                                continue
+                            rate = self._calculate_multi_hop_relay_rate(
+                                sat_pos, geo1_pos, geo2_pos, gs, req.data_type
+                            )
+                            if rate <= 0 or rate <= best_rate:
+                                continue
+                            if is_immediate_type:
+                                ok = (self._check_relay_bandwidth_available(geo1["id"], rate)
+                                      and self._check_relay_bandwidth_available(geo2["id"], rate))
+                            else:
+                                ok = is_resource_available(
+                                    satellite.sat_id, gs["id"], geo1["id"], geo2["id"], rate
+                                )
+                            if ok:
+                                best_rate = rate
+                                best_method = "relay"
+                                best_gs = gs["id"]
+                                best_relay = geo1["id"]
+                                best_relay2 = geo2["id"]
+
             # 记录选择的传输方式
             if best_rate > 0:
                 if best_method == "direct":
