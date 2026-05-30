@@ -45,6 +45,15 @@
       <i data-lucide="bar-chart-2"></i>
       <span>统计</span>
     </button>
+    <button
+      :class="{ active: activeView === 'playback' }"
+      type="button"
+      @click="$emit('set-view', 'playback')"
+      title="态势回放"
+    >
+      <i data-lucide="play-circle"></i>
+      <span>回放</span>
+    </button>
   </nav>
 </template>
 
