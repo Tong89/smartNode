@@ -145,10 +145,14 @@ class TestCheckVisibility:
     # --- 仰角阈值边界 ---
 
     def test_small_angle_below_threshold(self):
-        """地心角约 0.5°（仰角约 6.3°）< 10°，不可见。"""
+        """地心角约 0.5°、500km 高度：精确 ENU 仰角约 83°，远高于 10° 阈值，应可见。
+
+        注：原球面正弦近似错误地将此情形计算为仰角 ~6.3°；ENU 拓扑坐标
+        给出的 ~83° 才是物理正确值（卫星几乎在正上方）。
+        """
         sat = {"lat": 35.5, "lon": 139.0, "alt": 500000}
         gs = {"lat": 35.0, "lon": 139.0}
-        assert check_visibility(sat, gs, min_elevation=10) is False
+        assert check_visibility(sat, gs, min_elevation=10) is True
 
     def test_moderate_angle_above_threshold(self):
         """地心角约 1°（仰角约 12.5°）> 10°，可见。"""
@@ -304,18 +308,25 @@ class TestIntegrationCentralAngleVisibility:
     """通过已知地心角推算期望的 check_visibility 结果，验证两函数数值一致。"""
 
     def test_equatorial_satellite_500km_various_angles(self):
-        """赤道上 500 km 高度卫星，对不同地心角的可见性批量断言。"""
+        """赤道上 500 km 高度卫星，对不同地心角的 ENU 精确可见性批量断言。
+
+        500 km 轨道高度对应最大可见中心角约 24°（仰角 0° 时），仰角 10° 对应约 20°。
+        精确 ENU 坐标替代了原球面正弦近似，大角度（>24°）卫星正确判定为不可见。
+        """
         gs = {"lat": 0.0, "lon": 0.0}
         alt_m = 500000
-        # 对于 500 km 高度，临界仰角 10° 对应的地心角约 55°
-        # 小角度（< ~0.7°）仰角 < 10° → 不可见；中等角度（~1° ≤ x ≤ ~55°）→ 可见
+        # 精确 ENU 计算结果：
+        #   0.5°  → 仰角 ~83°  → 可见（原近似错误地给出 ~6.3°）
+        #   1.0°  → 仰角 ~76°  → 可见
+        #   10.0° → 仰角 ~18°  → 可见
+        #   30.0° → 仰角 ~-7°  → 不可见（卫星已在地平线以下）
+        #   60.0° → 仰角 ~-26° → 不可见
         expected = [
-            (0.5, False),    # 仰角约 6.3°
-            (1.0, True),     # 仰角约 12.5°
-            (10.0, True),    # 仰角约 61.7°
-            (30.0, True),    # 仰角约 53.0°
-            (45.0, True),    # 仰角约 27.7°
-            (60.0, False),   # 仰角约 3.7°
+            (0.5, True),     # 精确仰角 ~83°，几乎正上方
+            (1.0, True),     # 精确仰角 ~76°
+            (10.0, True),    # 精确仰角 ~18°
+            (30.0, False),   # 精确仰角 ~-7°，已低于地平线
+            (60.0, False),   # 精确仰角 ~-26°
         ]
         for angle_deg, exp_vis in expected:
             sat = {"lat": angle_deg, "lon": 0.0, "alt": alt_m}

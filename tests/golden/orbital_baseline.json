@@ -81,8 +81,8 @@
       "sat_lat": 35.5, "sat_lon": 139.0, "sat_alt_m": 500000,
       "gs_lat": 35.0, "gs_lon": 139.0,
       "min_elevation": 10,
-      "expected": false,
-      "note": "地心角约 0.5°，仰角约 6.3°，低于 10° 阈值"
+      "expected": true,
+      "note": "地心角约 0.5°，精确 ENU 仰角约 83°（远高于 10° 阈值），ENU 拓扑坐标修正了原球面正弦近似的误差"
     },
     "moderate_angle_visible": {
       "sat_lat": 36.0, "sat_lon": 139.0, "sat_alt_m": 500000,
