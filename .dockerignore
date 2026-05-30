@@ -1,0 +1,70 @@
+# =============================================================================
+# SmartNode — .dockerignore
+# Excludes files that should NOT be copied into the Docker build context.
+# Keeping the context small speeds up builds and reduces attack surface.
+# =============================================================================
+
+# Version control
+.git
+.gitignore
+.github
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Test artefacts
+tests/
+htmlcov/
+.coverage
+coverage.xml
+*.coveragerc
+
+# Development tooling
+*.bat
+*.ps1
+requirements-dev.in
+requirements-dev.txt
+
+# Editor / IDE config
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Local overrides and secrets — NEVER include these in the image
+.env
+.env.*
+*.env
+config/*.local.json
+
+# Documentation sources (the built frontend is kept)
+docs/
+*.md
+
+# Temporary files
+*.tmp
+*.log
+*.pid
+
+# Node artefacts (if any were to be present)
+node_modules/
+npm-debug.log
+
+# Data files that should be mounted as volumes in production
+data/
