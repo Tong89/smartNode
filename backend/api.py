@@ -16,7 +16,7 @@ from backend.auth import (
     decode_token,
     init_auth,
 )
-from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH, debug_api_enabled
+from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH, debug_api_enabled, validate_config
 from backend.envelope import ok
 from backend.errors import error_response, register_error_handlers
 from backend.rbac import require_role
@@ -743,6 +743,7 @@ def favicon():
 
 
 def run(host='127.0.0.1', port=5000, debug=False):
+    validate_config()  # 生产模式下缺失必填密钥即拒启
     simulation_engine.reset_requests()
     app.run(debug=debug, host=host, port=port, use_reloader=False, threaded=True)
 
