@@ -17,6 +17,11 @@ from backend.auth import (
 )
 from backend.errors import error_response, register_error_handlers
 from backend.rbac import require_role
+from backend.schemas import (
+    ValidationError,
+    validate_count_update,
+    validate_request_submission,
+)
 import jwt as _jwt
 
 from backend.core import (
@@ -41,6 +46,8 @@ logger = logging.getLogger("smartnode")
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
+# 限制请求体大小，防止超大 payload 耗尽资源
+app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024  # 1 MB
 
 # 注册统一脱敏错误处理器（4xx/5xx 返回稳定错误码，不回传 traceback）
 register_error_handlers(app)
@@ -86,8 +93,15 @@ def submit_transmission_request():
     """提交传输请求"""
     # 检查权限 - 仅管理员可提交请求
     
+    data = request.get_json(silent=True)
+    if data is None:
+        return error_response("UNSUPPORTED_MEDIA_TYPE", "请求体必须为 application/json")
     try:
-        data = request.json
+        validate_request_submission(data, allowed_data_types=set(DATA_TYPES.keys()))
+    except ValidationError as ve:
+        return error_response("VALIDATION_ERROR", details=ve.errors)
+
+    try:
         result = simulation_engine.submit_request(data)
         # 业务级错误（如指定卫星不存在）返回 4xx，便于前端区分客户端错误与服务端异常
         if isinstance(result, dict) and result.get("status") == "error":
@@ -442,21 +456,15 @@ def update_ground_stations():
     """更新地面站数量"""
     # 检查权限 - 仅管理员可修改配置
     
+    data = request.get_json(silent=True)
+    if data is None:
+        return error_response("UNSUPPORTED_MEDIA_TYPE", "请求体必须为 application/json")
     try:
-        data = request.get_json()
-        new_count = data.get('count')
-        
-        if new_count is None:
-            return jsonify({"error": "缺少count参数"}), 400
-        
-        if not isinstance(new_count, int):
-            return jsonify({"error": "count必须是整数"}), 400
-        
-        if new_count < MIN_GROUND_STATION_COUNT or new_count > MAX_GROUND_STATION_COUNT:
-            return jsonify({
-                "error": f"地面站数量必须在{MIN_GROUND_STATION_COUNT}到{MAX_GROUND_STATION_COUNT}之间"
-            }), 400
-        
+        validate_count_update(data, lo=MIN_GROUND_STATION_COUNT, hi=MAX_GROUND_STATION_COUNT)
+    except ValidationError as ve:
+        return error_response("VALIDATION_ERROR", details=ve.errors)
+    new_count = data['count']
+    try:
         success = simulation_engine.update_ground_station_count(new_count)
         
         if success:
@@ -480,21 +488,15 @@ def update_leo_satellites():
     """⭐ 更新LEO卫星数量 - 轨道参数预先已知"""
     # 检查权限 - 仅管理员可修改配置
     
+    data = request.get_json(silent=True)
+    if data is None:
+        return error_response("UNSUPPORTED_MEDIA_TYPE", "请求体必须为 application/json")
     try:
-        data = request.get_json()
-        new_count = data.get('count')
-        
-        if new_count is None:
-            return jsonify({"error": "缺少count参数"}), 400
-        
-        if not isinstance(new_count, int):
-            return jsonify({"error": "count必须是整数"}), 400
-        
-        if new_count < MIN_LEO_SATELLITE_COUNT:
-            return jsonify({
-                "error": f"LEO卫星数量必须大于等于{MIN_LEO_SATELLITE_COUNT}"
-            }), 400
-        
+        validate_count_update(data, lo=MIN_LEO_SATELLITE_COUNT, hi=None)
+    except ValidationError as ve:
+        return error_response("VALIDATION_ERROR", details=ve.errors)
+    new_count = data['count']
+    try:
         success = simulation_engine.update_leo_satellite_count(new_count)
         
         if success:
