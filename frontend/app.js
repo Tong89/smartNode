@@ -37,6 +37,8 @@ const app = Vue.createApp({
       backendOnline: false,
       cesiumReady: false,
       viewer: null,
+      // 2D/3D 地图模式：'3D'（默认）| '2D'（平面地图），持久化到 localStorage
+      mapMode: localStorage.getItem('smartnode_map_mode') === '2D' ? '2D' : '3D',
       // Cesium 增量更新：实体索引表，避免每次 removeAll 重建场景
       _entityIndex: {},      // id -> Cesium.Entity，管理节点（卫星、地面站、中继）
       _linkIndex: {},        // linkKey -> Cesium.Entity，管理链路 polyline
@@ -564,10 +566,40 @@ const app = Vue.createApp({
         });
 
         this.cesiumReady = true;
+
+        // 若上次选择了 2D 模式，初始化后立即切换
+        if (this.mapMode === '2D') {
+          this.viewer.scene.morphTo2D(0);
+        }
       } catch (error) {
         console.warn('Cesium 初始化失败:', error);
         this.cesiumReady = false;
       }
+    },
+
+    /**
+     * 在 2D 平面地图与 3D 地球模式之间切换。
+     * 使用 Cesium 内置的 morphTo2D / morphTo3D 完成平滑过渡动画（1 秒）。
+     * 用户选择持久化到 localStorage，下次打开页面时自动恢复。
+     */
+    toggleMapMode() {
+      if (!this.viewer || !this.cesiumReady || !window.Cesium) return;
+
+      if (this.mapMode === '3D') {
+        this.viewer.scene.morphTo2D(1.0);
+        this.mapMode = '2D';
+      } else {
+        this.viewer.scene.morphTo3D(1.0);
+        this.mapMode = '3D';
+      }
+
+      try {
+        localStorage.setItem('smartnode_map_mode', this.mapMode);
+      } catch (_) {
+        // localStorage 在某些环境下不可用，忽略异常
+      }
+
+      this.viewer.scene.requestRender();
     },
 
     /**

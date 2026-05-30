@@ -397,6 +397,43 @@ button:disabled {
   gap: 3px;
 }
 
+/* 2D/3D toggle button */
+.map-mode-btn {
+  min-width: 96px;
+  justify-content: center;
+}
+
+.map-mode-btn.layer-toggle-btn--active {
+  border-color: rgba(110, 190, 255, 0.70);
+  background: rgba(30, 58, 80, 0.88);
+  color: #cce8ff;
+}
+
+/* Small bold label showing the current mode abbreviation */
+.map-mode-icon {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  line-height: 1.4;
+  margin-right: 2px;
+}
+
+/* Mode badge in the map legend */
+.map-mode-badge {
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #c8e6ff;
+  line-height: 1.5;
+}
+
 .inspector {
   min-width: 0;
   min-height: 0;
