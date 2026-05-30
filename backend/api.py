@@ -805,6 +805,169 @@ def scenario_current():
 
 
 # ==========================================
+# 9. 仿真快照 / 回放 API
+# ==========================================
+from backend.snapshot import SnapshotManager as _SnapshotManager  # noqa: E402
+
+# 内存中保存最近一次的快照（进程重启后丢失；持久化可通过外部存储实现）
+_saved_snapshot: dict | None = None
+
+
+@app.route('/api/snapshot/save', methods=['POST'])
+@require_role('admin')
+@rate_limit(20, 60)
+def snapshot_save():
+    """拍摄当前仿真状态快照并保存至内存。
+
+    可选 JSON 体：``{"label": "回放点A"}``
+
+    返回快照摘要（不含完整请求列��以减小响应体积）。
+    """
+    body = request.get_json(silent=True) or {}
+    label = str(body.get("label", ""))[:128]
+    try:
+        snap = simulation_engine.snapshot(label=label)
+    except Exception:
+        logger.exception("快照保存失败")
+        return error_response("INTERNAL_ERROR")
+
+    global _saved_snapshot
+    _saved_snapshot = snap
+
+    # 响应中仅返回摘要，完整快照可通过 /api/snapshot/export 下载
+    return ok({
+        "version": snap["version"],
+        "saved_at": snap["saved_at"],
+        "label": snap.get("label", ""),
+        "current_time": snap["current_time"],
+        "id_counter": snap.get("id_counter", 0),
+        "active_request_count": len(snap.get("transmission_requests", [])),
+        "history_count": len(snap.get("request_history", [])),
+    })
+
+
+@app.route('/api/snapshot/load', methods=['POST'])
+@require_role('admin')
+@rate_limit(10, 60)
+def snapshot_load():
+    """将最���一次保存的快照恢复到仿真引擎，进入回放模式。
+
+    回放模式下主仿真循环暂停，/api/data 返回快照时刻的态势数据。
+    调用 /api/snapshot/resume 可退出回放模式，重启仿真。
+    """
+    if _saved_snapshot is None:
+        return error_response("NOT_FOUND", "尚未保存任何快照，请先调用 /api/snapshot/save")
+    try:
+        result = simulation_engine.restore(_saved_snapshot)
+    except ValueError as ve:
+        return error_response("VALIDATION_ERROR", str(ve))
+    except Exception:
+        logger.exception("快照恢复失败")
+        return error_response("INTERNAL_ERROR")
+    return ok(result)
+
+
+@app.route('/api/snapshot/resume', methods=['POST'])
+@require_role('admin')
+@rate_limit(10, 60)
+def snapshot_resume():
+    """退出回放模式，重启主仿真循环。"""
+    restarted = simulation_engine.resume_from_snapshot()
+    return ok({
+        "restarted": restarted,
+        "simulation_running": simulation_engine.running,
+    })
+
+
+@app.route('/api/snapshot/status', methods=['GET'])
+def snapshot_status():
+    """返回当前快照与回放状态摘要。"""
+    replay_mode = getattr(simulation_engine, '_replay_mode', False)
+    if _saved_snapshot is not None:
+        snap_summary = {
+            "available": True,
+            "saved_at": _saved_snapshot.get("saved_at", ""),
+            "label": _saved_snapshot.get("label", ""),
+            "current_time": _saved_snapshot.get("current_time", 0),
+            "active_request_count": len(_saved_snapshot.get("transmission_requests", [])),
+            "history_count": len(_saved_snapshot.get("request_history", [])),
+        }
+    else:
+        snap_summary = {"available": False}
+
+    return ok({
+        "replay_mode": replay_mode,
+        "simulation_running": simulation_engine.running,
+        "snapshot": snap_summary,
+    })
+
+
+@app.route('/api/snapshot/export', methods=['GET'])
+def snapshot_export():
+    """将内存中的快照以 JSON 文件形式下载。"""
+    if _saved_snapshot is None:
+        return error_response("NOT_FOUND", "尚未保存任何快照，请先调用 /api/snapshot/save")
+    try:
+        content = _SnapshotManager.to_json(_saved_snapshot)
+    except Exception:
+        logger.exception("快照导出失败")
+        return error_response("INTERNAL_ERROR")
+    label = (_saved_snapshot.get("label") or "snapshot").replace(" ", "_")[:32]
+    filename = f"{label}.snapshot.json"
+    return app.response_class(
+        response=content,
+        status=200,
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route('/api/snapshot/import', methods=['POST'])
+@require_role('admin')
+@rate_limit(10, 60)
+def snapshot_import():
+    """从上传的 JSON 文件导入快照并立即恢复仿真状态。
+
+    Content-Type: application/json  → JSON 解析
+    同时接受 multipart/form-data 中的 ``file`` 字段（前端文件上传）。
+    """
+    content_type = request.content_type or ""
+
+    if "multipart/form-data" in content_type:
+        file = request.files.get("file")
+        if file is None:
+            return error_response("VALIDATION_ERROR", "multipart 请求中未找到 'file' 字段")
+        raw_text = file.read(4 * 1024 * 1024).decode("utf-8", errors="replace")
+    else:
+        raw_bytes = request.get_data()
+        raw_text = raw_bytes.decode("utf-8", errors="replace")
+
+    if not raw_text.strip():
+        return error_response("VALIDATION_ERROR", "请求体为空")
+
+    try:
+        snap_data = _SnapshotManager.from_json(raw_text)
+    except ValueError as ve:
+        return error_response("VALIDATION_ERROR", f"快照解析失败: {ve}")
+
+    errors = _SnapshotManager.validate(snap_data)
+    if errors:
+        return error_response("VALIDATION_ERROR", "; ".join(errors))
+
+    try:
+        result = simulation_engine.restore(snap_data)
+    except ValueError as ve:
+        return error_response("VALIDATION_ERROR", str(ve))
+    except Exception:
+        logger.exception("快照导入恢复失败")
+        return error_response("INTERNAL_ERROR")
+
+    global _saved_snapshot
+    _saved_snapshot = snap_data
+    return ok(result)
+
+
+# ==========================================
 # 8. Static frontend and open metadata routes
 # ==========================================
 
