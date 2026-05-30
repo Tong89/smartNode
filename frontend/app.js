@@ -47,6 +47,11 @@ const app = Vue.createApp({
       refreshing: false,
       resourceFormReady: false,
       refreshTimer: null,
+      // SSE 实时推送相关
+      sseSource: null,          // EventSource 实例
+      sseConnected: false,      // SSE 连接状态
+      sseEnabled: false,        // 是否已成功建立 SSE 连接（用于禁用轮询回退）
+      recentEvents: [],         // 最近 10 条调度事件（前端展示用）
       requestForm: {
         data_type: 'DATA_SLICE',
         data_size: 120,
@@ -170,13 +175,16 @@ const app = Vue.createApp({
   mounted() {
     this.renderIcons();
     this.initCesium();
+    // 先执行一次初始全量拉取
     this.refreshAll();
     this.refreshScenarios();
     this.refreshRequestList();
-    this.refreshTimer = window.setInterval(() => {
-      this.refreshAll();
-      this.refreshRequestList();
-    }, 2000);
+    // 尝试建立 SSE 连接；若浏览器不支持或服务端不可达则回退轮询
+    if (typeof EventSource !== 'undefined') {
+      this.initSSE();
+    } else {
+      this._startPolling();
+    }
     window.addEventListener('resize', this.resizeViewer);
   },
 
@@ -185,7 +193,16 @@ const app = Vue.createApp({
   },
 
   beforeUnmount() {
-    window.clearInterval(this.refreshTimer);
+    // 关闭 SSE 连接
+    if (this.sseSource) {
+      this.sseSource.close();
+      this.sseSource = null;
+    }
+    // 关闭回退轮询（如果存在）
+    if (this.refreshTimer) {
+      window.clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
     window.removeEventListener('resize', this.resizeViewer);
     if (this.viewer && !this.viewer.isDestroyed()) {
       this.viewer.destroy();
@@ -290,6 +307,86 @@ const app = Vue.createApp({
       } finally {
         this.refreshing = false;
       }
+    },
+
+    // ── SSE 实时推送 ─────────────────────────────────────────────
+
+    /**
+     * 启动 SSE 连接，订阅 /api/v1/stream。
+     * 成功后停止回退轮询；断线后自动重连（浏览器原生行为）。
+     * 若服务端返回非 2xx 或 5 秒内未收到任何事件，则降级为轮询模式。
+     */
+    initSSE() {
+      const url = this.apiUrl('/api/v1/stream');
+      const es = new EventSource(url);
+      this.sseSource = es;
+
+      // 超时保护：5 秒内未收到任何 message 则降级为轮询
+      let fallbackTimer = window.setTimeout(() => {
+        if (!this.sseEnabled) {
+          es.close();
+          this.sseSource = null;
+          this._startPolling();
+        }
+      }, 5000);
+
+      es.addEventListener('snapshot', (e) => {
+        try {
+          const snap = JSON.parse(e.data);
+          this._applySnapshot(snap);
+        } catch (_) {}
+
+        // 首次收到快照：确认 SSE 可用，取消降级定时器，停止任何已启动的轮询
+        if (!this.sseEnabled) {
+          this.sseEnabled = true;
+          this.sseConnected = true;
+          this.backendOnline = true;
+          window.clearTimeout(fallbackTimer);
+          if (this.refreshTimer) {
+            window.clearInterval(this.refreshTimer);
+            this.refreshTimer = null;
+          }
+        }
+      });
+
+      es.addEventListener('event', (e) => {
+        try {
+          const evt = JSON.parse(e.data);
+          this.recentEvents = [evt, ...this.recentEvents].slice(0, 10);
+        } catch (_) {}
+      });
+
+      es.onerror = () => {
+        this.sseConnected = false;
+        // EventSource 在断线后会自动尝试重连；若首次连接从未成功，降级轮询
+        if (!this.sseEnabled) {
+          window.clearTimeout(fallbackTimer);
+          es.close();
+          this.sseSource = null;
+          this._startPolling();
+        }
+      };
+    },
+
+    /**
+     * 将 SSE snapshot 事件的内容应用到 Vue 响应式数据中。
+     * snapshot 结构与 /api/data 返回的结构兼容。
+     */
+    _applySnapshot(snap) {
+      if (!snap || typeof snap !== 'object') return;
+      this.systemData = snap;
+      this.updateScene();
+    },
+
+    /**
+     * 启动 2 秒轮询回退（在 SSE 不可用时使用）。
+     */
+    _startPolling() {
+      if (this.refreshTimer) return; // 已在运行
+      this.refreshTimer = window.setInterval(() => {
+        this.refreshAll();
+        this.refreshRequestList();
+      }, 2000);
     },
 
     // ── 分页请求列表 ─────────────────────────────────────────────
