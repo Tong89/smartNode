@@ -76,7 +76,9 @@ def _extract_key():
 
 
 def is_public_path(path):
-    if path in PUBLIC_PATHS:
+    # 归一化版本化前缀 /api/v1/ -> /api/，使白名单同时覆盖版本化别名
+    normalized = path.replace("/api/v1/", "/api/", 1) if path.startswith("/api/v1/") else path
+    if normalized in PUBLIC_PATHS:
         return True
     return any(path.startswith(p) for p in PUBLIC_PREFIXES)
 
