@@ -68,11 +68,27 @@ export interface SystemData {
   stats: Record<string, unknown>;
 }
 
+export interface DecisionMetrics {
+  acceptance_rate: number;
+  completion_rate: number;
+  avg_scheduling_time: number;
+  avg_transmission_time: number;
+  throughput_mbps: number;
+  total_scheduling_time: number;
+  total_transmission_time: number;
+  scheduling_count: number;
+  transmission_count: number;
+}
+
 export interface ResourceUtilization {
   resource_utilization: { satellites: number; ground_stations: number; geo_relays: number };
   total_requests: number;
   accepted_requests: number;
   rejected_requests: number;
+  /** Decision metrics including acceptance rate and throughput */
+  decision_metrics?: DecisionMetrics;
+  /** Map of rejection reason code to count */
+  rejection_distribution?: Record<string, number>;
 }
 
 /** 场景对象 (Scenario Schema v1) */
