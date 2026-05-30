@@ -79,6 +79,26 @@ def add_api_headers(response):
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
     response.headers['Cache-Control'] = 'no-store'
+
+    # 安全响应头：缓解点击劫持、MIME 嗅探、Referrer 泄露等
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    # CSP：兼容现有前端（Cesium/Vue/lucide 走 unpkg CDN 与 worker/wasm/blob）
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com blob:; "
+        "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "img-src 'self' data: blob: https:; "
+        "worker-src 'self' blob:; "
+        "connect-src 'self' https://unpkg.com; "
+        "font-src 'self' data: https://unpkg.com; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'"
+    )
+    # 不泄露服务器版本细节
+    response.headers['Server'] = 'smartnode'
     return response
 
 
