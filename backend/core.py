@@ -1037,9 +1037,12 @@ class SimulationEngine:
             weights = [0.5, 0.3, 0.2]
             data_type = random.choices(data_types, weights=weights)[0]
             
-            # 根据类型生成数据大小
+            # 根据类型生成数据大小（DATA_TYPES 只有 size_range/size_unit，无 typical_size）
             data_config = DATA_TYPES.get(data_type, {})
-            size_range = data_config.get("typical_size", [1, 100])
+            size_range = data_config.get("size_range", (1, 100))
+            if not isinstance(size_range, (tuple, list)) or len(size_range) < 2:
+                size_range = (1, 100)
+            # data_size 单位与该数据类型的 size_unit 一致（与用户请求口径相同）
             data_size = random.uniform(size_range[0], size_range[1])
             
             # 背景任务优先级较低
