@@ -722,12 +722,15 @@ class ContentTask:
 class TransmissionRequest:
     """数据传输请求 - 与卫星绑定"""
     _id_counter = 0
-    
-    def __init__(self, data_type, data_size, priority, max_delay, 
+    _id_lock = threading.Lock()  # 保护跨线程的 ID 自增
+
+    def __init__(self, data_type, data_size, priority, max_delay,
                  start_time=None, end_time=None, satellite_id=None, source="user",
                  experiment_requirements=None, selected_ground_stations=None):
-        TransmissionRequest._id_counter += 1
-        self.id = f"REQ_{TransmissionRequest._id_counter:04d}"
+        # 线程安全地分配唯一请求编号，避免并发提交产生重复 REQ_ 编号
+        with TransmissionRequest._id_lock:
+            TransmissionRequest._id_counter += 1
+            self.id = f"REQ_{TransmissionRequest._id_counter:04d}"
         self.data_type = data_type
         self.data_size = data_size
         self.priority = priority
@@ -1018,9 +1021,14 @@ class SimulationEngine:
             except Exception as e:
                 error_count += 1
                 import traceback
+                tb = traceback.format_exc()
                 print(f"[ERROR] 仿真循环异常 ({error_count}/{max_consecutive_errors}): {e}")
-                traceback.print_exc()
-                
+                print(tb)
+                # ⭐ 可观测：保留最近的循环异常（供调试接口查询），不静默吞掉
+                recent = getattr(self, "_loop_errors", [])
+                recent.append({"time": time.time(), "error": str(e), "traceback": tb})
+                self._loop_errors = recent[-20:]
+
                 if error_count >= max_consecutive_errors:
                     print(f"[FATAL] 连续错误超过{max_consecutive_errors}次，仿真循环终止")
                     break
@@ -2607,7 +2615,7 @@ class SimulationEngine:
             meo_sats = list(self.meo_satellites)
             geo_relays = list(self.geo_relays)
             ground_stations = list(self.ground_stations)
-            all_gs = self.all_ground_stations
+            all_gs = list(self.all_ground_stations)  # 快照，避免锁外迭代被并发改写
         
         # ⭐ 在锁外进行数据序列化（耗时操作）
         requests_data = [req.to_dict() for req in all_reqs]
