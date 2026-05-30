@@ -1,0 +1,64 @@
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly on Sunday at 06:00 UTC (offset from security.yml to spread load)
+    - cron: '0 6 * * 0'
+
+permissions:
+  contents: read
+  security-events: write  # Required to upload CodeQL results to GitHub Security tab
+  actions: read           # Required for private repos and Actions introspection
+
+jobs:
+  analyze:
+    name: codeql / Python static analysis
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Python is the primary language; add 'javascript' if frontend scanning needed
+        language: ['python']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Initialize CodeQL tools and create the analysis database
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Use the default security-and-quality query suite which includes:
+          #   - CWE coverage (injection, path traversal, weak crypto, etc.)
+          #   - Python-specific checks (SQL injection, command injection, etc.)
+          queries: security-and-quality
+          # Additional query packs for deeper Python security analysis
+          packs: codeql/python-queries
+
+      # Auto-build for interpreted languages (Python does not need compilation)
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      # Run the CodeQL analysis and upload results to the Security tab
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'
+          # Upload results as SARIF to GitHub Security tab
+          upload: true
+          # Output SARIF for artifact archiving
+          output: codeql-results-${{ matrix.language }}.sarif
+
+      - name: Upload CodeQL SARIF as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif-${{ matrix.language }}
+          path: codeql-results-${{ matrix.language }}.sarif
+          retention-days: 30
