@@ -16,6 +16,7 @@ from backend.auth import (
     init_auth,
 )
 from backend.errors import error_response, register_error_handlers
+from backend.rbac import require_role
 import jwt as _jwt
 
 from backend.core import (
@@ -80,6 +81,7 @@ def get_debug_status():
 
 
 @app.route('/api/request', methods=['POST'])
+@require_role('operator')
 def submit_transmission_request():
     """提交传输请求"""
     # 检查权限 - 仅管理员可提交请求
@@ -435,6 +437,7 @@ def get_resource_status():
 
 
 @app.route('/api/update_ground_stations', methods=['POST'])
+@require_role('admin')
 def update_ground_stations():
     """更新地面站数量"""
     # 检查权限 - 仅管理员可修改配置
@@ -472,6 +475,7 @@ def update_ground_stations():
         return error_response("INTERNAL_ERROR")
 
 @app.route('/api/update_leo_satellites', methods=['POST'])
+@require_role('admin')
 def update_leo_satellites():
     """⭐ 更新LEO卫星数量 - 轨道参数预先已知"""
     # 检查权限 - 仅管理员可修改配置
