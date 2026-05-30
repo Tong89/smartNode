@@ -41,6 +41,10 @@ from backend.scheduling.handover import HandoverController
 from backend.resources import ResourceManager
 from backend.scheduling.scheduler import Scheduler
 from backend.scheduling.qos import QosAdmissionController, QOS_REJECTION_REASONS
+from backend.scheduling.trace import (
+    DecisionTraceBuffer,
+    build_trace_from_link_selection,
+)
 
 logger = logging.getLogger("smartnode")
 
@@ -426,6 +430,9 @@ class SimulationEngine:
         # 链路选路与重调度集中于 Scheduler（使用 QoS 感知策略）
         from backend.scheduling.qos import QosAwareStrategy
         self.scheduler = Scheduler(self, strategy=QosAwareStrategy())
+
+        # 调度决策轨迹环形缓冲（上限 500 条，不会无限增长）
+        self.decision_trace_buffer = DecisionTraceBuffer()
 
         # 背景任务生成器配置（降低频率以提高性能）
         self.background_task_enabled = False  # ⭐ 关闭背景任务，便于调试
@@ -951,6 +958,17 @@ class SimulationEngine:
                             self.stats["rejected_requests"] += 1
                             # 释放可能锁定的卫星资源
                             self._release_resources(req.id)
+                            # 记录超时等待拒绝的决策轨迹
+                            _timeout_trace = build_trace_from_link_selection(
+                                req=req,
+                                satellite_id=req.satellite_id or "",
+                                sim_time=self.current_time,
+                                all_candidates=[],
+                                selected_link=None,
+                                outcome="rejected",
+                                reject_reason=REJECTION_REASONS["TIMEOUT_WAIT"],
+                            )
+                            self.decision_trace_buffer.add(_timeout_trace)
 
             # ==================================================
             # 2. 处理传输中的请求 (进度更新 + 动态切换)
@@ -1140,7 +1158,27 @@ class SimulationEngine:
         self.scheduler.apply_link_assignment(req, satellite, link)
 
     def _reroute_transmission(self, req, satellite, sat_pos):
-        return self.scheduler.reroute_transmission(req, satellite, sat_pos)
+        result = self.scheduler.reroute_transmission(req, satellite, sat_pos)
+        if result:
+            # 链路重调度成功，记录轨迹
+            _reroute_link = {
+                "method": req.transmission_method,
+                "ground_station": req.selected_ground_station,
+                "relay": req.selected_relay,
+                "relay2": req.selected_relay2,
+                "rate": req.transmission_rate,
+                "score": req.transmission_rate,
+            }
+            _reroute_trace = build_trace_from_link_selection(
+                req=req,
+                satellite_id=satellite.sat_id,
+                sim_time=self.current_time,
+                all_candidates=[_reroute_link],
+                selected_link=_reroute_link,
+                outcome="rerouted",
+            )
+            self.decision_trace_buffer.add(_reroute_trace)
+        return result
 
     def _interrupt_request(self, req, reason_code="LINK_INTERRUPTED"):
         req.status = "rejected"
@@ -1152,6 +1190,17 @@ class SimulationEngine:
         self.stats["transmitting_requests"] = max(0, self.stats.get("transmitting_requests", 0) - 1)
         self.stats["rejected_requests"] += 1
         self._release_resources(req.id)
+        # 记录链路中断的决策轨迹
+        _interrupt_trace = build_trace_from_link_selection(
+            req=req,
+            satellite_id=req.satellite_id or "",
+            sim_time=self.current_time,
+            all_candidates=[],
+            selected_link=None,
+            outcome="rejected",
+            reject_reason=REJECTION_REASONS[reason_code],
+        )
+        self.decision_trace_buffer.add(_interrupt_trace)
 
     def submit_request(self, request_data):
         """提交用户传输请求 - 基于实时资源占用决策"""
@@ -1615,6 +1664,17 @@ class SimulationEngine:
                     self.request_history.append(req)
                     self.stats["accepted_requests"] -= 1
                     self.stats["rejected_requests"] += 1
+                    # 记录 RAW_IMAGE 无直连地面站的决策轨迹
+                    _raw_reject_trace = build_trace_from_link_selection(
+                        req=req,
+                        satellite_id=satellite.sat_id,
+                        sim_time=self.current_time,
+                        all_candidates=[],
+                        selected_link=None,
+                        outcome="rejected",
+                        reject_reason=REJECTION_REASONS["RAW_IMAGE_NO_DIRECT"],
+                    )
+                    self.decision_trace_buffer.add(_raw_reject_trace)
                     return
                 # 有未来过境机会，锁定卫星等待
                 self._occupy_satellite_only(req.id, satellite.sat_id)
@@ -1711,6 +1771,17 @@ class SimulationEngine:
                     self.request_history.append(req)
                     self.stats["accepted_requests"] -= 1
                     self.stats["rejected_requests"] += 1
+                    # 记录即时拒绝的决策轨迹
+                    _reject_trace = build_trace_from_link_selection(
+                        req=req,
+                        satellite_id=satellite.sat_id,
+                        sim_time=self.current_time,
+                        all_candidates=[],
+                        selected_link=None,
+                        outcome="rejected",
+                        reject_reason=REJECTION_REASONS["NO_VISIBLE_RELAY"],
+                    )
+                    self.decision_trace_buffer.add(_reject_trace)
                     return
         
         # ============================================
@@ -1721,11 +1792,17 @@ class SimulationEngine:
             req.start_transmit_time = self.current_time
             req.progress = 0.0
             req.transmission_rate = best_rate
-            
+
+            # 记录降级动作（速率截断）
+            _demotion_action = None
+
             # ⭐ 错误注入：速率降低
             if req.error_injection and req.error_injection.get("type") == "rate_reduction":
                 reduction_factor = req.error_injection.get("factor", 0.5)
                 req.transmission_rate = best_rate * reduction_factor
+                _demotion_action = (
+                    f"rate_reduced_by_injection: {best_rate:.1f}->{req.transmission_rate:.1f}Mbps"
+                )
                 self._log(
                     f"错误注入：速率降低 {(1-reduction_factor)*100:.0f}% "
                     f"({best_rate:.1f} -> {req.transmission_rate:.1f} Mbps)",
@@ -1734,13 +1811,13 @@ class SimulationEngine:
                 )
             else:
                 req.transmission_rate = best_rate
-            
+
             req.transmission_method = best_method
             req.selected_ground_station = best_gs
             req.selected_relay = best_relay
             req.selected_relay2 = best_relay2
             self.stats["transmitting_requests"] += 1
-            
+
             # ⭐ 错误注入：传输延迟
             if req.error_injection and req.error_injection.get("type") == "delay":
                 delay_seconds = req.error_injection.get("value", 5)
@@ -1750,10 +1827,31 @@ class SimulationEngine:
                     level="high",
                     request=req
                 )
-            
+
             # 标记资源为占用状态（TASK_CMD/INTEL不占用资源）
             if not (is_task_cmd or is_intel_info):
                 self._occupy_resources(req.id, satellite.sat_id, best_gs, best_relay, best_relay2)
+
+            # 记录调度决策轨迹
+            _selected_link = {
+                "method": best_method,
+                "ground_station": best_gs,
+                "relay": best_relay,
+                "relay2": best_relay2,
+                "rate": best_rate,
+                "score": best_rate,
+            }
+            _trace = build_trace_from_link_selection(
+                req=req,
+                satellite_id=satellite.sat_id,
+                sim_time=self.current_time,
+                all_candidates=[_selected_link],
+                selected_link=_selected_link,
+                outcome="scheduled",
+                demotion_action=_demotion_action,
+            )
+            self.decision_trace_buffer.add(_trace)
+
         else:
             # 没有可用链路，保持accepted状态等待
             req.status = "accepted"
