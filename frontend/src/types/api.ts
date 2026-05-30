@@ -66,3 +66,24 @@ export interface ResourceUtilization {
   accepted_requests: number;
   rejected_requests: number;
 }
+
+/** 场景对象 (Scenario Schema v1) */
+export interface ScenarioData {
+  version: string;
+  name: string;
+  saved_at: string;
+  ground_station_count: number;
+  leo_satellite_count: number;
+  geo_relay_count: number;
+  data_types: string[];
+}
+
+/** /api/scenario/load 和 /api/scenario/import 的还原结果 */
+export interface ScenarioRestoreResult {
+  restored: boolean;
+  scenario_name: string;
+  saved_at: string;
+  changes: string[];
+  ground_station_count: number;
+  leo_satellite_count: number;
+}

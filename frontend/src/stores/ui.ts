@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
-export type ActiveView = 'requests' | 'resources';
+export type ActiveView = 'requests' | 'resources' | 'scenario';
 export type NoticeType = 'success' | 'error';
 
 export const useUiStore = defineStore('ui', () => {

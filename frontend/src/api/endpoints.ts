@@ -10,6 +10,8 @@ import { apiClient } from './client';
 import type {
   SystemData,
   ResourceUtilization,
+  ScenarioData,
+  ScenarioRestoreResult,
 } from '../types/api';
 
 // ── Payload types for write endpoints ───────────────────────────────────────
@@ -114,4 +116,63 @@ export function updateGroundStations(payload: UpdateGroundStationsPayload): Prom
  */
 export function updateLeoSatellites(payload: UpdateLeoSatellitesPayload): Promise<UpdateResourceResult> {
   return apiClient.post<UpdateResourceResult>('/api/update_leo_satellites', payload);
+}
+
+// ── Scenario API ─────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/scenario/current — Retrieve the last saved in-memory scenario.
+ * Returns null when nothing has been saved yet.
+ */
+export function fetchCurrentScenario(): Promise<ScenarioData | null> {
+  return apiClient.get<ScenarioData | null>('/api/scenario/current');
+}
+
+/**
+ * POST /api/scenario/save — Snapshot current engine resource config as a scenario.
+ */
+export function saveScenario(name?: string): Promise<ScenarioData> {
+  return apiClient.post<ScenarioData>('/api/scenario/save', { name: name ?? '' });
+}
+
+/**
+ * POST /api/scenario/load — Restore the last saved scenario to the engine.
+ */
+export function loadScenario(): Promise<ScenarioRestoreResult> {
+  return apiClient.post<ScenarioRestoreResult>('/api/scenario/load', {});
+}
+
+/**
+ * GET /api/scenario/export — Download the current scenario as a file.
+ * Returns the raw Blob so the caller can trigger a browser download.
+ */
+export async function exportScenario(format: 'json' | 'yaml' = 'json'): Promise<Blob> {
+  const url = apiClient.url(`/api/scenario/export?format=${format}`);
+  const token = localStorage.getItem('smartnode_token');
+  const headers: HeadersInit = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const response = await fetch(url, { method: 'GET', headers });
+  if (!response.ok) throw new Error(`导出失败 (${response.status})`);
+  return response.blob();
+}
+
+/**
+ * POST /api/scenario/import — Upload a JSON or YAML scenario file and restore it.
+ */
+export async function importScenario(file: File): Promise<ScenarioRestoreResult> {
+  const url = apiClient.url('/api/scenario/import');
+  const token = localStorage.getItem('smartnode_token');
+  const headers: HeadersInit = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(url, { method: 'POST', headers, body: form });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error((payload as Record<string, unknown>).message as string || '导入失败');
+  }
+  const payload = await response.json();
+  // Unwrap envelope if present
+  if (payload && payload.code === 0 && 'data' in payload) return payload.data;
+  return payload;
 }
