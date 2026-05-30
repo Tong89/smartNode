@@ -25,6 +25,8 @@ smartNode/
 │  ├─ app.py          # 后端启动入口
 │  ├─ api.py          # Flask API 和静态页面托管
 │  └─ core.py         # 仿真模型、配置和调度引擎
+├─ docker/
+│  └─ entrypoint.sh   # 容器启动脚本（gunicorn 参数、生产校验）
 ├─ frontend/
 │  ├─ assets/
 │  ├─ app.js
@@ -32,6 +34,9 @@ smartNode/
 │  └─ styles.css
 ├─ main.py            # 兼容入口
 ├─ run_server.bat     # Windows 快速启动脚本
+├─ Dockerfile         # 多阶段生产镜像（非 root + gunicorn）
+├─ docker-compose.yml # 服务编排
+├─ .dockerignore      # 构建上下文排除规则
 ├─ requirements.in        # 运行时直接依赖（source constraints）
 ├─ requirements.txt       # 锁定的运行时依赖（pip-compile 生成，含哈希）
 ├─ requirements-dev.in    # 开发依赖（source constraints）
@@ -65,6 +70,83 @@ pip-compile --generate-hashes requirements-dev.in
 
 > **注意**：永远不要手动编辑 `requirements.txt` 或 `requirements-dev.txt`。
 > 请修改对应的 `.in` 文件，然后重新运行 `pip-compile` 生成锁定文件。
+
+## 容器化部署（推荐生产使用）
+
+SmartNode 提供多阶段 Dockerfile 与 docker-compose 编排，以 gunicorn 多进程 WSGI 服务器运行，容器以非 root 用户启动。
+
+### 前提条件
+
+- [Docker Engine](https://docs.docker.com/engine/install/) >= 24.0
+- [Docker Compose](https://docs.docker.com/compose/install/) v2（通常随 Docker Desktop 内置）
+
+### 一键启动
+
+```bash
+git clone https://github.com/Tong89/smartNode.git
+cd smartNode
+
+# 开发模式（默认配置）
+docker compose up --build
+
+# 后台运行
+docker compose up --build -d
+```
+
+启动成功后访问：
+
+- 前端界面：<http://localhost:5000/frontend/>
+- 健康检查：<http://localhost:5000/api/health>
+
+### 生产部署
+
+创建 `.env` 文件（不应提交到版本库）并填写真实密钥：
+
+```bash
+cp .env.example .env   # 如不存在则手动创建
+```
+
+`.env` 示例：
+
+```dotenv
+SMARTNODE_ENV=production
+SMARTNODE_JWT_SECRET=<用 python -c "import secrets; print(secrets.token_hex(32))" 生成>
+SMARTNODE_API_KEY=<随机强密钥>
+SMARTNODE_TIME_SCALE=60
+SMARTNODE_LOG_LEVEL=WARNING
+LOG_FORMAT=json
+```
+
+然后启动：
+
+```bash
+docker compose --env-file .env up -d
+```
+
+### 常用操作
+
+```bash
+# 查看实时日志
+docker compose logs -f smartnode
+
+# 停止并移除容器（数据不丢失）
+docker compose down
+
+# 重建镜像（依赖更新后）
+docker compose up --build -d
+```
+
+### 容器安全说明
+
+| 特性 | 说明 |
+| --- | --- |
+| 非 root 运行 | UID/GID 1001（`smartnode` 用户） |
+| 多阶段构建 | 构建工具不进入最终镜像 |
+| 锁定依赖 | 使用带哈希的 `requirements.txt` |
+| 信号传播 | 使用 `tini` 作为 PID-1 |
+| no-new-privileges | security_opt 禁止提权 |
+
+---
 
 ## 快速开始
 

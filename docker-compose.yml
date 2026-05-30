@@ -1,0 +1,75 @@
+# =============================================================================
+# SmartNode — docker-compose.yml
+#
+# Usage:
+#   docker compose up              # foreground, rebuild if Dockerfile changed
+#   docker compose up -d           # detached
+#   docker compose up --build -d   # force rebuild then run detached
+#   docker compose down            # stop and remove containers
+#
+# The service is available at http://localhost:5000/frontend/
+# Health endpoint:        http://localhost:5000/api/health
+# =============================================================================
+services:
+  smartnode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+
+    image: smartnode:latest
+
+    container_name: smartnode
+
+    restart: unless-stopped
+
+    ports:
+      - "5000:5000"
+
+    environment:
+      # ----------------------------------------------------------------
+      # Application settings — override here or via a .env file
+      # ----------------------------------------------------------------
+      SMARTNODE_ENV: "${SMARTNODE_ENV:-development}"
+      SMARTNODE_HOST: "0.0.0.0"
+      SMARTNODE_PORT: "5000"
+      SMARTNODE_TIME_SCALE: "${SMARTNODE_TIME_SCALE:-10}"
+      SMARTNODE_LOG_LEVEL: "${SMARTNODE_LOG_LEVEL:-INFO}"
+      LOG_FORMAT: "${LOG_FORMAT:-json}"
+
+      # ----------------------------------------------------------------
+      # Secrets — always supply real values in production
+      # ----------------------------------------------------------------
+      SMARTNODE_JWT_SECRET: "${SMARTNODE_JWT_SECRET:-dev-insecure-secret-change-me}"
+      SMARTNODE_API_KEY: "${SMARTNODE_API_KEY:-}"
+
+      # ----------------------------------------------------------------
+      # gunicorn tuning
+      # ----------------------------------------------------------------
+      GUNICORN_WORKERS: "${GUNICORN_WORKERS:-}"
+      GUNICORN_TIMEOUT: "${GUNICORN_TIMEOUT:-120}"
+      GUNICORN_LOG_LEVEL: "${GUNICORN_LOG_LEVEL:-info}"
+
+    volumes:
+      # Mount an optional config file without rebuilding the image.
+      # Create a local smartnode.json with your overrides, or remove
+      # this line if you manage all settings via environment variables.
+      - "./config:/app/config:ro"
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    # Run as non-root user (matches Dockerfile UID/GID 1001)
+    user: "1001:1001"
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp
