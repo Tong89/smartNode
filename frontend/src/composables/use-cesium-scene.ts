@@ -2,11 +2,13 @@
  * useCesiumScene — composable that owns Cesium viewer lifecycle and scene rendering.
  *
  * Returns:
- *   cesiumReady  — ref<boolean>  whether Cesium Viewer was initialised successfully
- *   initCesium   — call once (mounted) with a DOM element id
- *   updateScene  — call whenever satellite / gs / relay / request data changes
- *   resizeViewer — call on window resize or layout change
- *   destroyViewer — call in beforeUnmount
+ *   cesiumReady         — ref<boolean>  whether Cesium Viewer was initialised successfully
+ *   showCoverage        — ref<boolean>  whether coverage footprint layer is visible
+ *   initCesium          — call once (mounted) with a DOM element id
+ *   updateScene         — call whenever satellite / gs / relay / request data changes
+ *   resizeViewer        — call on window resize or layout change
+ *   destroyViewer       — call in beforeUnmount
+ *   toggleCoverageLayer — toggle coverage footprint visibility
  */
 
 import { ref } from 'vue';
@@ -25,10 +27,43 @@ interface SceneData {
   activeRequests: TransmissionRequest[];
 }
 
+/**
+ * Compute the ground coverage radius (in meters) for a satellite/relay
+ * given its orbital altitude and minimum elevation angle.
+ *
+ * Geometry (spherical Earth):
+ *   Earth radius R_E = 6_371_000 m
+ *   Satellite altitude h (m above surface)
+ *   Minimum elevation angle ε (degrees)
+ *
+ *   Nadir half-angle ρ satisfies:  cos(ρ) = R_E / (R_E + h)
+ *   Earth central angle λ = 90° − ε − ρ
+ *   Ground coverage radius = R_E × λ (in radians)
+ */
+function computeCoverageRadius(altitudeM: number, minElevationDeg: number): number {
+  const R_E = 6_371_000; // Earth radius in metres
+  const h = Math.max(altitudeM, 0);
+  const cosNadir = R_E / (R_E + h);
+  const nadirRad = Math.acos(Math.min(1, cosNadir));
+  const minElRad = (minElevationDeg * Math.PI) / 180;
+  const earthCentralAngleRad = Math.max(0, Math.PI / 2 - minElRad - nadirRad);
+  return R_E * earthCentralAngleRad;
+}
+
 export function useCesiumScene() {
   const cesiumReady = ref(false);
+  /** Whether the coverage footprint layer (LEO circles + GEO rings) is visible */
+  const showCoverage = ref(true);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let viewer: any = null;
+
+  /**
+   * Coverage footprint entity index:
+   *   `leo-cov-{satId}`  → LEO satellite coverage ellipse
+   *   `geo-vis-{relayId}` → GEO relay visibility ring ellipse
+   */
+  const _coverageIndex: Record<string, unknown> = {};
 
   function getCesium(): CesiumType | null {
     return (window as unknown as { Cesium?: CesiumType }).Cesium ?? null;
@@ -166,6 +201,125 @@ export function useCesiumScene() {
     }
   }
 
+  /**
+   * Upsert a coverage ellipse (circle) entity on the ground surface.
+   * Uses Cesium's `ellipse` primitive so the circle drapes on the globe.
+   *
+   * @param entityId   — unique entity id in the viewer
+   * @param lat        — centre latitude (degrees)
+   * @param lon        — centre longitude (degrees)
+   * @param radiusM    — coverage radius in metres
+   * @param fillColor  — semi-transparent fill colour
+   * @param strokeColor — outline colour
+   */
+  function upsertCoverageEllipse(
+    entityId: string,
+    lat: number,
+    lon: number,
+    radiusM: number,
+    fillColor: unknown,
+    strokeColor: unknown,
+  ): void {
+    const Cesium = getCesium();
+    if (!Cesium || !viewer) return;
+
+    const position = toCartesian(lon, lat, 0);
+    const r = Math.max(10_000, radiusM); // at least 10 km to stay visible
+
+    if (_coverageIndex[entityId]) {
+      // Update position and semi-axes of existing entity
+      const existing = _coverageIndex[entityId] as { position: unknown; ellipse: { semiMajorAxis: number; semiMinorAxis: number; show: boolean } };
+      existing.position = position;
+      existing.ellipse.semiMajorAxis = r;
+      existing.ellipse.semiMinorAxis = r;
+      existing.ellipse.show = showCoverage.value;
+    } else {
+      const entity = viewer.entities.add({
+        id: entityId,
+        position,
+        ellipse: {
+          semiMajorAxis: r,
+          semiMinorAxis: r,
+          material: fillColor,
+          outline: true,
+          outlineColor: strokeColor,
+          outlineWidth: 1.5,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          show: showCoverage.value,
+        },
+      });
+      _coverageIndex[entityId] = entity;
+    }
+  }
+
+  /**
+   * Update coverage footprints for all LEO satellites and GEO relay visibility rings.
+   * Called as part of updateScene to keep footprints in sync with node positions.
+   */
+  function updateCoverageFootprints(
+    satellites: Satellite[],
+    geoRelays: GeoRelay[],
+  ): void {
+    const Cesium = getCesium();
+    if (!Cesium || !viewer) return;
+
+    // Colours: LEO footprint — warm amber, semi-transparent; GEO ring — cool blue
+    const leoCoverageColor = Cesium.Color.fromCssColorString('#f5a623').withAlpha(0.13);
+    const leoStrokeColor = Cesium.Color.fromCssColorString('#f5a623').withAlpha(0.55);
+    const geoCoverageColor = Cesium.Color.fromCssColorString('#7ec8e3').withAlpha(0.10);
+    const geoStrokeColor = Cesium.Color.fromCssColorString('#7ec8e3').withAlpha(0.50);
+
+    const liveCoverageIds = new Set<string>();
+
+    // LEO satellite coverage footprints
+    satellites
+      .filter((sat) => sat.type === 'LEO')
+      .forEach((sat) => {
+        const entityId = `leo-cov-${sat.id}`;
+        liveCoverageIds.add(entityId);
+        const minEl = sat.min_elevation ?? 10;
+        const radius = computeCoverageRadius(sat.alt, minEl);
+        upsertCoverageEllipse(entityId, sat.lat, sat.lon, radius, leoCoverageColor, leoStrokeColor);
+      });
+
+    // GEO relay visibility rings
+    geoRelays.forEach((relay) => {
+      const r = relay as GeoRelay;
+      const entityId = `geo-vis-${relay.id}`;
+      liveCoverageIds.add(entityId);
+      const relayLat = r.lat ?? 0;
+      const relayAlt = r.alt ?? 35_786_000;
+      const minEl = r.coverage_min_elevation ?? 10;
+      const radius = computeCoverageRadius(relayAlt, minEl);
+      upsertCoverageEllipse(entityId, relayLat, relay.lon, radius, geoCoverageColor, geoStrokeColor);
+    });
+
+    // Remove stale coverage entities (satellites or relays that disappeared)
+    for (const eid of Object.keys(_coverageIndex)) {
+      if (!liveCoverageIds.has(eid)) {
+        viewer.entities.remove(_coverageIndex[eid]);
+        delete _coverageIndex[eid];
+      }
+    }
+  }
+
+  /**
+   * Toggle the coverage footprint layer on/off.
+   * Updates the `show` property of every coverage entity and triggers a re-render.
+   */
+  function toggleCoverageLayer(): void {
+    showCoverage.value = !showCoverage.value;
+    for (const entity of Object.values(_coverageIndex)) {
+      const e = entity as { ellipse?: { show: boolean } };
+      if (e.ellipse) {
+        e.ellipse.show = showCoverage.value;
+      }
+    }
+    if (viewer && cesiumReady.value) {
+      viewer.scene.requestRender();
+    }
+  }
+
   function updateScene(data: SceneData): void {
     const Cesium = getCesium();
     if (!viewer || !cesiumReady.value || !Cesium) return;
@@ -176,6 +330,10 @@ export function useCesiumScene() {
     const linkColor = Cesium.Color.fromCssColorString('#f0c76b');
 
     viewer.entities.removeAll();
+    // Coverage index entities were removed by removeAll; clear the index
+    for (const key of Object.keys(_coverageIndex)) {
+      delete _coverageIndex[key];
+    }
 
     const satMap = new Map<string, Satellite>();
     const gsMap = new Map<string, GroundStation>();
@@ -237,6 +395,9 @@ export function useCesiumScene() {
         drawRequestLinks(extReq as Parameters<typeof drawRequestLinks>[0], satellite, geoMap, gsMap, linkColor);
       });
 
+    // Draw coverage footprints (LEO) and visibility rings (GEO) on top
+    updateCoverageFootprints(data.satellites, data.geoRelays);
+
     viewer.scene.requestRender();
   }
 
@@ -256,9 +417,11 @@ export function useCesiumScene() {
 
   return {
     cesiumReady,
+    showCoverage,
     initCesium,
     updateScene,
     resizeViewer,
     destroyViewer,
+    toggleCoverageLayer,
   };
 }
