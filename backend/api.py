@@ -943,6 +943,109 @@ def scenario_compare():
 
 
 # ==========================================
+# 8b. TLE 导入与缓存 API
+# ==========================================
+from backend.physics.tle_source import (  # noqa: E402
+    fetch_group,
+    fetch_by_catnr,
+    get_cache_status,
+    inject_tle_into_constellation,
+    SUPPORTED_GROUPS,
+)
+
+
+@app.route('/api/tle/import', methods=['POST'])
+@require_role('admin')
+@rate_limit(5, 60)
+def tle_import():
+    """从 Celestrak 导入指定分组或编号的 TLE 星历并缓存到本地。
+
+    请求体（JSON）::
+
+        {
+            "group": "starlink",      # 星座分组名，与 catnr 二选一
+            "catnr": 25544,           # NORAD 卫星编号，与 group 二选一
+            "force_refresh": false,   # 是否强制刷新（可选，默认 false）
+            "inject": false           # 是否将 TLE 注入仿真引擎星座（可选，默认 false）
+        }
+
+    响应示例::
+
+        {"code": 0, "data": {
+            "group": "starlink",
+            "entry_count": 6000,
+            "injected": 12,
+            "first_epoch": "2024-05-01T00:00:00Z",
+            "cached_at": "2024-05-01T12:00:00Z"
+        }}
+    """
+    body = request.get_json(silent=True) or {}
+    group = str(body.get("group", "")).strip()
+    catnr = body.get("catnr")
+    force_refresh = bool(body.get("force_refresh", False))
+    do_inject = bool(body.get("inject", False))
+
+    if not group and catnr is None:
+        return error_response("VALIDATION_ERROR", "必须提供 'group'（星座名）或 'catnr'（NORAD 编号）之一")
+
+    try:
+        if catnr is not None:
+            try:
+                catnr_int = int(catnr)
+            except (TypeError, ValueError):
+                return error_response("VALIDATION_ERROR", "'catnr' 必须为整数")
+            entries = fetch_by_catnr(catnr_int, force_refresh=force_refresh)
+            used_group = f"catnr_{catnr_int}"
+        else:
+            entries = fetch_group(group, force_refresh=force_refresh)
+            used_group = group
+
+        injected = 0
+        if do_inject and entries:
+            with simulation_engine.lock:
+                sats = list(simulation_engine.leo_satellites) + list(simulation_engine.meo_satellites)
+            injected = inject_tle_into_constellation(entries, sats)
+
+        first_epoch = entries[0][3] if entries else ""
+        return ok({
+            "group": used_group,
+            "entry_count": len(entries),
+            "injected": injected,
+            "first_epoch": first_epoch,
+            "supported_groups": SUPPORTED_GROUPS,
+        })
+    except Exception:
+        logger.exception("TLE 导入失败")
+        return error_response("INTERNAL_ERROR")
+
+
+@app.route('/api/tle/status', methods=['GET'])
+def tle_status():
+    """查看本地 TLE 缓存的新鲜度与条目统计。
+
+    响应示例::
+
+        {"code": 0, "data": {
+            "cache_dir": "/path/to/data/tle_cache",
+            "total_groups": 3,
+            "total_tles": 18000,
+            "entries": [
+                {"group": "starlink", "fetched_at": "...", "age_seconds": 300,
+                 "is_fresh": true, "entry_count": 6000}
+            ],
+            "supported_groups": [...]
+        }}
+    """
+    try:
+        status = get_cache_status()
+        status["supported_groups"] = SUPPORTED_GROUPS
+        return ok(status)
+    except Exception:
+        logger.exception("TLE 状态查询失败")
+        return error_response("INTERNAL_ERROR")
+
+
+# ==========================================
 # 9. 仿真快照 / 回放 API
 # ==========================================
 from backend.snapshot import SnapshotManager as _SnapshotManager  # noqa: E402
