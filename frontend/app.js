@@ -37,6 +37,9 @@ const app = Vue.createApp({
       backendOnline: false,
       cesiumReady: false,
       viewer: null,
+      // Cesium 增量更新：实体索引表，避免每次 removeAll 重建场景
+      _entityIndex: {},      // id -> Cesium.Entity，管理节点（卫星、地面站、中继）
+      _linkIndex: {},        // linkKey -> Cesium.Entity，管理链路 polyline
       systemData: {},
       systemInfo: {},
       resourceStatus: {},
@@ -207,6 +210,9 @@ const app = Vue.createApp({
     if (this.viewer && !this.viewer.isDestroyed()) {
       this.viewer.destroy();
     }
+    // 清空增量更新索引，防止后续残留引用
+    this._entityIndex = {};
+    this._linkIndex = {};
   },
 
   methods: {
@@ -495,6 +501,14 @@ const app = Vue.createApp({
       }
     },
 
+    /**
+     * 增量更新 Cesium 场景：对新增节点执行 add、对已有节点仅更新 position，
+     * 对消失节点执行 remove，避免每次刷新调用 removeAll 导致的闪烁与卡顿。
+     *
+     * 索引表：
+     *   _entityIndex  { id -> Entity }  管理卫星、地面站、GEO 中继节点
+     *   _linkIndex    { linkKey -> Entity }  管理链路 polyline，按请求 id + 端点复用
+     */
     updateScene() {
       if (!this.viewer || !this.cesiumReady || !window.Cesium) return;
 
@@ -503,71 +517,123 @@ const app = Vue.createApp({
       const geoColor = Cesium.Color.fromCssColorString('#2e6fa3');
       const linkColor = Cesium.Color.fromCssColorString('#f0c76b');
 
-      this.viewer.entities.removeAll();
-
+      // 收集本轮所有节点 id，用于事后清理已消失实体
+      const liveNodeIds = new Set();
       const satMap = new Map();
       const gsMap = new Map();
       const geoMap = new Map();
 
+      // ── 地面站 ──────────────────────────────────────────────────
       this.groundStations.forEach((station) => {
+        const eid = `gs-${station.id}`;
+        liveNodeIds.add(eid);
         gsMap.set(station.id, station);
-        this.viewer.entities.add({
-          id: `gs-${station.id}`,
-          position: this.toCartesian(station.lon, station.lat, 0),
-          point: {
-            pixelSize: 8,
-            color: gsColor,
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 1,
-          },
-          label: this.makeLabel(station.name, '#e7fff7', 16),
-        });
+        const pos = this.toCartesian(station.lon, station.lat, 0);
+
+        if (this._entityIndex[eid]) {
+          // 仅更新位置，保留其他属性引用
+          this._entityIndex[eid].position = pos;
+        } else {
+          const entity = this.viewer.entities.add({
+            id: eid,
+            position: pos,
+            point: {
+              pixelSize: 8,
+              color: gsColor,
+              outlineColor: Cesium.Color.WHITE,
+              outlineWidth: 1,
+            },
+            label: this.makeLabel(station.name, '#e7fff7', 16),
+          });
+          this._entityIndex[eid] = entity;
+        }
       });
 
+      // ── GEO 中继 ────────────────────────────────────────────────
       this.geoRelays.forEach((relay) => {
+        const eid = `geo-${relay.id}`;
+        liveNodeIds.add(eid);
         geoMap.set(relay.id, relay);
-        this.viewer.entities.add({
-          id: `geo-${relay.id}`,
-          position: this.toCartesian(relay.lon, relay.lat, relay.alt),
-          point: {
-            pixelSize: 11,
-            color: geoColor,
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 1,
-          },
-          label: this.makeLabel(relay.name, '#e7f3ff', 18),
-        });
+        const pos = this.toCartesian(relay.lon, relay.lat, relay.alt);
+
+        if (this._entityIndex[eid]) {
+          this._entityIndex[eid].position = pos;
+        } else {
+          const entity = this.viewer.entities.add({
+            id: eid,
+            position: pos,
+            point: {
+              pixelSize: 11,
+              color: geoColor,
+              outlineColor: Cesium.Color.WHITE,
+              outlineWidth: 1,
+            },
+            label: this.makeLabel(relay.name, '#e7f3ff', 18),
+          });
+          this._entityIndex[eid] = entity;
+        }
       });
 
+      // ── 卫星 ────────────────────────────────────────────────────
       this.satellites.forEach((satellite) => {
+        const eid = `sat-${satellite.id}`;
+        liveNodeIds.add(eid);
         satMap.set(satellite.id, satellite);
-        this.viewer.entities.add({
-          id: `sat-${satellite.id}`,
-          position: this.toCartesian(satellite.lon, satellite.lat, satellite.alt),
-          point: {
-            pixelSize: satellite.type === 'LEO' ? 7 : 9,
-            color: satColor,
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 1,
-          },
-          label: this.makeLabel(satellite.id, '#fff3db', 14),
-        });
+        const pos = this.toCartesian(satellite.lon, satellite.lat, satellite.alt);
+
+        if (this._entityIndex[eid]) {
+          this._entityIndex[eid].position = pos;
+        } else {
+          const entity = this.viewer.entities.add({
+            id: eid,
+            position: pos,
+            point: {
+              pixelSize: satellite.type === 'LEO' ? 7 : 9,
+              color: satColor,
+              outlineColor: Cesium.Color.WHITE,
+              outlineWidth: 1,
+            },
+            label: this.makeLabel(satellite.id, '#fff3db', 14),
+          });
+          this._entityIndex[eid] = entity;
+        }
       });
 
+      // ── 移除已消失的节点实体 ─────────────────────────────────────
+      for (const eid of Object.keys(this._entityIndex)) {
+        if (!liveNodeIds.has(eid)) {
+          this.viewer.entities.remove(this._entityIndex[eid]);
+          delete this._entityIndex[eid];
+        }
+      }
+
+      // ── 链路增量更新 ─────────────────────────────────────────────
+      const liveLinkKeys = new Set();
       this.activeRequestsForScene
         .filter((req) => req.status === 'transmitting')
         .slice(0, 24)
         .forEach((req) => {
           const satellite = satMap.get(req.satellite_id);
           if (!satellite) return;
-
-          this.drawRequestLinks(req, satellite, geoMap, gsMap, linkColor);
+          this.updateRequestLinks(req, satellite, geoMap, gsMap, linkColor, liveLinkKeys);
         });
+
+      // 移除已消失的链路实体
+      for (const lkey of Object.keys(this._linkIndex)) {
+        if (!liveLinkKeys.has(lkey)) {
+          this.viewer.entities.remove(this._linkIndex[lkey]);
+          delete this._linkIndex[lkey];
+        }
+      }
 
       this.viewer.scene.requestRender();
     },
 
-    drawRequestLinks(req, satellite, geoMap, gsMap, color) {
+    /**
+     * 为单条请求按需增量更新/创建链路 polyline 实体。
+     * liveLinkKeys 用于记录本轮活跃的链路 key，以便事后清理。
+     */
+    updateRequestLinks(req, satellite, geoMap, gsMap, color, liveLinkKeys) {
       const groundStation = req.selected_ground_station
         ? gsMap.get(req.selected_ground_station)
         : null;
@@ -579,24 +645,50 @@ const app = Vue.createApp({
         : null;
 
       if (firstRelay && secondRelay) {
-        this.drawLink(satellite, firstRelay, color);
-        this.drawLink(firstRelay, secondRelay, color);
+        this.upsertLink(`${req.id}:sat-relay1`, satellite, firstRelay, color, liveLinkKeys);
+        this.upsertLink(`${req.id}:relay1-relay2`, firstRelay, secondRelay, color, liveLinkKeys);
         if (groundStation) {
-          this.drawLink(secondRelay, groundStation, color);
+          this.upsertLink(`${req.id}:relay2-gs`, secondRelay, groundStation, color, liveLinkKeys);
         }
         return;
       }
 
       if (firstRelay) {
-        this.drawLink(satellite, firstRelay, color);
+        this.upsertLink(`${req.id}:sat-relay1`, satellite, firstRelay, color, liveLinkKeys);
         if (groundStation) {
-          this.drawLink(firstRelay, groundStation, color);
+          this.upsertLink(`${req.id}:relay1-gs`, firstRelay, groundStation, color, liveLinkKeys);
         }
         return;
       }
 
       if (groundStation && req.transmission_method === 'direct') {
-        this.drawLink(satellite, groundStation, color);
+        this.upsertLink(`${req.id}:sat-gs`, satellite, groundStation, color, liveLinkKeys);
+      }
+    },
+
+    /**
+     * 按 linkKey 复用已有的 polyline 实体；不存在时新建并注册到 _linkIndex。
+     * 复用时更新两端点坐标，保持实体引用稳定。
+     */
+    upsertLink(linkKey, from, to, color, liveLinkKeys) {
+      liveLinkKeys.add(linkKey);
+      const positions = [
+        this.toCartesian(from.lon, from.lat, from.alt || 0),
+        this.toCartesian(to.lon, to.lat, to.alt || 0),
+      ];
+
+      if (this._linkIndex[linkKey]) {
+        // 更新两端点位置
+        this._linkIndex[linkKey].polyline.positions = positions;
+      } else {
+        const entity = this.viewer.entities.add({
+          polyline: {
+            positions,
+            width: 2.5,
+            material: color,
+          },
+        });
+        this._linkIndex[linkKey] = entity;
       }
     },
 
@@ -613,6 +705,10 @@ const app = Vue.createApp({
       };
     },
 
+    /**
+     * @deprecated 由 upsertLink 取代，保留仅供外部可能调用的场景兼容。
+     * 直接新建一个 polyline 实体（不索引，不复用）。
+     */
     drawLink(from, to, color) {
       this.viewer.entities.add({
         polyline: {
@@ -624,6 +720,14 @@ const app = Vue.createApp({
           material: color,
         },
       });
+    },
+
+    /**
+     * @deprecated 由 updateRequestLinks 取代。
+     */
+    drawRequestLinks(req, satellite, geoMap, gsMap, color) {
+      const liveLinkKeys = new Set();
+      this.updateRequestLinks(req, satellite, geoMap, gsMap, color, liveLinkKeys);
     },
 
     toCartesian(lon, lat, alt = 0) {
