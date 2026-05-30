@@ -16,6 +16,7 @@ from backend.config import (
     HANDOVER_RATE_RATIO,
     RESOURCE_TIGHT_THRESHOLD as CFG_RESOURCE_TIGHT_THRESHOLD,
 )
+from backend.physics.coordinates import ecef_to_lla, eci_to_ecef, lla_to_ecef
 
 logger = logging.getLogger("smartnode")
 
@@ -206,16 +207,9 @@ class OrbitalElements:
         omega_earth = 7.292115e-5
         theta = omega_earth * dt_seconds
 
-        # 转到地固坐标系 (ECEF)
-        x_ecef = x * math.cos(theta) + y * math.sin(theta)
-        y_ecef = -x * math.sin(theta) + y * math.cos(theta)
-        z_ecef = z
-
-        # 转换到经纬度
-        r_ground = math.sqrt(x_ecef ** 2 + y_ecef ** 2 + z_ecef ** 2)
-        lat = math.degrees(math.asin(z_ecef / r_ground))
-        lon = math.degrees(math.atan2(y_ecef, x_ecef))
-        alt = (r_ground - self.R_earth) * 1000  # 转换为米
+        # ECI -> ECEF -> LLA（WGS-84 椭球），替代球面近似
+        x_ecef, y_ecef, z_ecef = eci_to_ecef(x, y, z, theta)
+        lat, lon, alt = ecef_to_lla(x_ecef, y_ecef, z_ecef)
 
         return lat, lon, alt
 
