@@ -4,10 +4,30 @@
  * Centralises systemData, systemInfo, resourceStatus, utilization, and
  * backendOnline status previously scattered across App.vue component data.
  * Provides configurable polling via startPolling / stopPolling.
+ *
+ * All network calls are routed through the typed API client in `../api`.
  */
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import type { SystemData, Satellite, GroundStation, GeoRelay, TransmissionRequest } from '../types/api';
+import { apiClient } from '../api/client';
+import {
+  fetchHealth,
+  fetchData,
+  fetchSystemInfo,
+  fetchResourceStatus,
+  fetchResourceUtilization,
+  submitRequest as apiSubmitRequest,
+  updateGroundStations as apiUpdateGroundStations,
+  updateLeoSatellites as apiUpdateLeoSatellites,
+} from '../api/endpoints';
+import type {
+  TransmissionRequestPayload,
+  UpdateGroundStationsPayload,
+  UpdateLeoSatellitesPayload,
+  TransmissionRequestResult,
+  UpdateResourceResult,
+} from '../api/endpoints';
 
 /** Default polling interval in milliseconds */
 const DEFAULT_POLL_INTERVAL = 2000;
@@ -19,24 +39,9 @@ const DATA_TYPE_LABELS: Record<string, string> = {
   RAW_IMAGE: '原始影像',
 };
 
-function resolveApiBase(): string {
-  const params = new URLSearchParams(window.location.search);
-  const configured = params.get('api') || localStorage.getItem('space_api_base');
-  if (configured) {
-    return configured.replace(/\/$/, '');
-  }
-  if (
-    window.location.protocol === 'file:' ||
-    (window.location.port && window.location.port !== '5000')
-  ) {
-    return 'http://127.0.0.1:5000';
-  }
-  return '';
-}
-
 export const useSimulationStore = defineStore('simulation', () => {
   // ── State ──────────────────────────────────────────────────────────────────
-  const apiBase = ref(resolveApiBase());
+  const apiBase = ref(apiClient.baseUrl);
   const backendOnline = ref(false);
   const refreshing = ref(false);
   const pollInterval = ref(DEFAULT_POLL_INTERVAL);
@@ -121,39 +126,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     ];
   });
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  function apiUrl(path: string): string {
-    return `${apiBase.value}${path}`;
-  }
-
-  async function fetchJson<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...((options.headers as Record<string, string>) || {}),
-    };
-    const token = localStorage.getItem('smartnode_token');
-    if (token && !headers['Authorization']) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    const response = await fetch(apiUrl(path), { ...options, headers });
-    const contentType = response.headers.get('content-type') || '';
-    const payload = contentType.includes('application/json')
-      ? await response.json()
-      : await response.text();
-    if (!response.ok) {
-      const message =
-        typeof payload === 'string'
-          ? payload
-          : (payload.message || payload.reject_reason || payload.error || '请求失败');
-      throw new Error(message);
-    }
-    if (payload && typeof payload === 'object' && payload.code === 0 && 'data' in payload) {
-      return payload.data as T;
-    }
-    return payload as T;
-  }
-
-  // ── Actions ��───────────────────────────────────────────────────────────────
+  // ── Actions ────────────────────────────────────────────────────────────────
 
   /** Fetch all backend data in parallel and update store state. */
   async function refreshAll(): Promise<void> {
@@ -161,11 +134,11 @@ export const useSimulationStore = defineStore('simulation', () => {
     refreshing.value = true;
     try {
       const [health, data, info, status] = await Promise.allSettled([
-        fetchJson('/api/health'),
-        fetchJson<SystemData>('/api/data'),
-        fetchJson<Record<string, unknown>>('/api/system_info'),
-        fetchJson<Record<string, unknown>>('/api/resource_status'),
-        fetchJson('/api/resource_utilization'),
+        fetchHealth(),
+        fetchData(),
+        fetchSystemInfo(),
+        fetchResourceStatus(),
+        fetchResourceUtilization(),
       ]);
 
       backendOnline.value = health.status === 'fulfilled';
@@ -220,14 +193,31 @@ export const useSimulationStore = defineStore('simulation', () => {
 
   /** Update the API base URL and immediately refresh all data. */
   function setApiBase(value: string): void {
-    const normalized = (value || '').trim().replace(/\/$/, '');
-    apiBase.value = normalized === window.location.origin ? '' : normalized;
-    if (apiBase.value) {
-      localStorage.setItem('space_api_base', apiBase.value);
-    } else {
-      localStorage.removeItem('space_api_base');
-    }
+    apiClient.setBaseUrl(value);
+    apiBase.value = apiClient.baseUrl;
     void refreshAll();
+  }
+
+  /**
+   * Submit a new transmission request via the typed API client.
+   * Returns the result object from the backend.
+   */
+  function sendRequest(payload: TransmissionRequestPayload): Promise<TransmissionRequestResult> {
+    return apiSubmitRequest(payload);
+  }
+
+  /**
+   * Update the ground-station pool size.
+   */
+  function sendUpdateGroundStations(payload: UpdateGroundStationsPayload): Promise<UpdateResourceResult> {
+    return apiUpdateGroundStations(payload);
+  }
+
+  /**
+   * Update the LEO satellite constellation size.
+   */
+  function sendUpdateLeoSatellites(payload: UpdateLeoSatellitesPayload): Promise<UpdateResourceResult> {
+    return apiUpdateLeoSatellites(payload);
   }
 
   return {
@@ -256,10 +246,12 @@ export const useSimulationStore = defineStore('simulation', () => {
     dataTypeOptions,
     utilizationRows,
     // actions
-    fetchJson,
     refreshAll,
     startPolling,
     stopPolling,
     setApiBase,
+    sendRequest,
+    sendUpdateGroundStations,
+    sendUpdateLeoSatellites,
   };
 });

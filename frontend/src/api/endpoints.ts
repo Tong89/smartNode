@@ -1,0 +1,117 @@
+/**
+ * endpoints.ts — Typed endpoint methods for every smartNode backend route.
+ *
+ * Each function delegates to the shared `apiClient` singleton and returns a
+ * strongly-typed promise that matches the backend response schema defined in
+ * `types/api.ts`.
+ */
+
+import { apiClient } from './client';
+import type {
+  SystemData,
+  ResourceUtilization,
+} from '../types/api';
+
+// ── Payload types for write endpoints ───────────────────────────────────────
+
+export interface TransmissionRequestPayload {
+  data_type: string;
+  data_size: number;
+  priority: number;
+  max_delay: number;
+  selected_ground_stations: string[];
+  satellite_id?: string;
+}
+
+export interface UpdateGroundStationsPayload {
+  count: number;
+}
+
+export interface UpdateLeoSatellitesPayload {
+  count: number;
+}
+
+// ── Response types ───────────────────────────────────────────────────────────
+
+export interface HealthResponse {
+  status: string;
+  time?: number;
+  [key: string]: unknown;
+}
+
+export interface TransmissionRequestResult {
+  id: string;
+  status: 'accepted' | 'rejected' | 'pending' | 'transmitting' | 'completed';
+  reject_reason?: string;
+  [key: string]: unknown;
+}
+
+export interface UpdateResourceResult {
+  success: boolean;
+  message?: string;
+  [key: string]: unknown;
+}
+
+// ── Endpoint functions ───────────────────────────────────────────────────────
+
+/**
+ * GET /api/health — Liveness check.
+ * Returns basic status and server time.
+ */
+export function fetchHealth(): Promise<HealthResponse> {
+  return apiClient.get<HealthResponse>('/api/health');
+}
+
+/**
+ * GET /api/data — Full simulation snapshot.
+ * Returns all satellites, ground stations, geo relays, requests, and stats.
+ */
+export function fetchData(): Promise<SystemData> {
+  return apiClient.get<SystemData>('/api/data');
+}
+
+/**
+ * GET /api/system_info — Static system configuration.
+ * Returns available data types, node counts, and other metadata.
+ */
+export function fetchSystemInfo(): Promise<Record<string, unknown>> {
+  return apiClient.get<Record<string, unknown>>('/api/system_info');
+}
+
+/**
+ * GET /api/resource_status — Per-resource occupancy summary.
+ * Returns a `summary` sub-object with utilization percentages.
+ */
+export function fetchResourceStatus(): Promise<Record<string, unknown>> {
+  return apiClient.get<Record<string, unknown>>('/api/resource_status');
+}
+
+/**
+ * GET /api/resource_utilization — Aggregate utilization metrics.
+ * Returns totals for accepted, rejected, and in-flight requests.
+ */
+export function fetchResourceUtilization(): Promise<ResourceUtilization> {
+  return apiClient.get<ResourceUtilization>('/api/resource_utilization');
+}
+
+/**
+ * POST /api/request — Submit a new transmission request.
+ * Returns the created request object including its assigned `id` and `status`.
+ */
+export function submitRequest(payload: TransmissionRequestPayload): Promise<TransmissionRequestResult> {
+  return apiClient.post<TransmissionRequestResult>('/api/request', payload);
+}
+
+/**
+ * POST /api/update_ground_stations — Resize the ground-station pool.
+ */
+export function updateGroundStations(payload: UpdateGroundStationsPayload): Promise<UpdateResourceResult> {
+  return apiClient.post<UpdateResourceResult>('/api/update_ground_stations', payload);
+}
+
+/**
+ * POST /api/update_leo_satellites — Resize the LEO satellite constellation.
+ */
+export function updateLeoSatellites(payload: UpdateLeoSatellitesPayload): Promise<UpdateResourceResult> {
+  return apiClient.post<UpdateResourceResult>('/api/update_leo_satellites', payload);
+}

@@ -136,30 +136,22 @@ export default defineComponent({
           ? [requestForm.value.ground_station_id]
           : [];
 
-        const payload: Record<string, unknown> = {
+        const result = await simStore.sendRequest({
           data_type: requestForm.value.data_type,
           data_size: Number(requestForm.value.data_size),
           priority: Number(requestForm.value.priority),
           max_delay: Number(requestForm.value.max_delay),
           selected_ground_stations: selectedGroundStations,
-        };
-
-        if (requestForm.value.satellite_id) {
-          payload.satellite_id = requestForm.value.satellite_id;
-        }
-
-        const result = await simStore.fetchJson<Record<string, unknown>>('/api/request', {
-          method: 'POST',
-          body: JSON.stringify(payload),
+          satellite_id: requestForm.value.satellite_id || undefined,
         });
 
         if (result && result.status === 'rejected') {
           uiStore.setNotice(
-            `请求被拒绝：${(result.reject_reason as string) || '资源暂不可用'}`,
+            `请求被拒绝：${result.reject_reason || '资源暂不可用'}`,
             'error',
           );
         } else {
-          uiStore.setNotice(`请求已提交：${(result.id as string) || '已进入队列'}`);
+          uiStore.setNotice(`请求已提交：${result.id || '已进入队列'}`);
         }
 
         await simStore.refreshAll();
@@ -172,9 +164,8 @@ export default defineComponent({
 
     async function updateGroundStations() {
       try {
-        await simStore.fetchJson('/api/update_ground_stations', {
-          method: 'POST',
-          body: JSON.stringify({ count: Number(resourceForm.value.ground_station_count) }),
+        await simStore.sendUpdateGroundStations({
+          count: Number(resourceForm.value.ground_station_count),
         });
         uiStore.setNotice('地面站数量已更新');
         uiStore.invalidateResourceForm();
@@ -186,9 +177,8 @@ export default defineComponent({
 
     async function updateLeoSatellites() {
       try {
-        await simStore.fetchJson('/api/update_leo_satellites', {
-          method: 'POST',
-          body: JSON.stringify({ count: Number(resourceForm.value.leo_satellite_count) }),
+        await simStore.sendUpdateLeoSatellites({
+          count: Number(resourceForm.value.leo_satellite_count),
         });
         uiStore.setNotice('卫星数量已更新');
         uiStore.invalidateResourceForm();
