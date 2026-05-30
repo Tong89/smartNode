@@ -4,11 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>天基智枢 SmartNode 仿真平台</title>
-  <link rel="stylesheet" href="https://unpkg.com/cesium@1.108/Build/Cesium/Widgets/widgets.css">
   <link rel="stylesheet" href="./styles.css">
-  <script src="https://unpkg.com/cesium@1.108/Build/Cesium/Cesium.js"></script>
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- 本地化依赖：Cesium/Vue/lucide 由 Vite 从 node_modules 打包（去除运行时 CDN，离线可用） -->
+  <script type="module" src="/src/vendor.js"></script>
 </head>
 <body>
   <div id="app" class="shell" v-cloak>
@@ -217,6 +215,6 @@
     </main>
   </div>
 
-  <script src="./app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
