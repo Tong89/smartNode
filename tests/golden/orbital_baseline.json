@@ -1,0 +1,128 @@
+{
+  "_comment": "数值黄金基准 – 由 orbit.py 计算函数生成，用于 pytest.approx 回归断言。",
+  "calc_central_angle": {
+    "same_point": {
+      "inputs": [0.0, 0.0, 0.0, 0.0],
+      "expected": 0.0,
+      "tol": 1e-9
+    },
+    "antipodal_equator": {
+      "inputs": [0.0, 0.0, 0.0, 180.0],
+      "expected": 180.0,
+      "tol": 1e-6
+    },
+    "quarter_equator": {
+      "inputs": [0.0, 0.0, 0.0, 90.0],
+      "expected": 90.0,
+      "tol": 1e-6
+    },
+    "north_to_south_pole": {
+      "inputs": [90.0, 0.0, -90.0, 0.0],
+      "expected": 180.0,
+      "tol": 1e-6
+    },
+    "equator_45deg": {
+      "inputs": [0.0, 0.0, 0.0, 45.0],
+      "expected": 45.0,
+      "tol": 1e-6
+    },
+    "diagonal_45_to_neg45": {
+      "inputs": [45.0, 45.0, -45.0, -45.0],
+      "expected": 120.0,
+      "tol": 1e-4
+    }
+  },
+  "orbital_elements_iss_like": {
+    "semi_major_axis_km": 6778.0,
+    "eccentricity": 0.0,
+    "inclination_deg": 51.6,
+    "raan_deg": 0.0,
+    "arg_perigee_deg": 0.0,
+    "mean_anomaly_deg": 0.0,
+    "orbital_period_s": 5553.456,
+    "orbital_period_tol": 1.0,
+    "mean_motion_rad_s": 0.0011314,
+    "mean_motion_tol": 1e-6,
+    "t0_lat_deg": 0.0,
+    "t0_lon_deg": 0.0,
+    "t0_alt_m": 399863.0,
+    "t0_tol": 500.0
+  },
+  "orbital_elements_polar": {
+    "semi_major_axis_km": 7000.0,
+    "eccentricity": 0.0,
+    "inclination_deg": 90.0,
+    "raan_deg": 0.0,
+    "arg_perigee_deg": 0.0,
+    "mean_anomaly_deg": 0.0,
+    "orbital_period_s": 5828.517,
+    "orbital_period_tol": 1.0,
+    "t0_lat_deg": 0.0,
+    "t0_lon_deg": 0.0,
+    "t0_alt_m": 621863.0,
+    "t0_tol": 500.0
+  },
+  "check_visibility": {
+    "overhead_min_el_0": {
+      "sat_lat": 35.0, "sat_lon": 139.0, "sat_alt_m": 500000,
+      "gs_lat": 35.0, "gs_lon": 139.0,
+      "min_elevation": 0,
+      "expected": true,
+      "note": "d < 0.001 边界，仰角 = 90°"
+    },
+    "overhead_min_el_90": {
+      "sat_lat": 35.0, "sat_lon": 139.0, "sat_alt_m": 500000,
+      "gs_lat": 35.0, "gs_lon": 139.0,
+      "min_elevation": 90,
+      "expected": true,
+      "note": "正上方仰角 = 90°，满足任何 min_elevation 阈值"
+    },
+    "small_angle_below_threshold": {
+      "sat_lat": 35.5, "sat_lon": 139.0, "sat_alt_m": 500000,
+      "gs_lat": 35.0, "gs_lon": 139.0,
+      "min_elevation": 10,
+      "expected": false,
+      "note": "地心角约 0.5°，仰角约 6.3°，低于 10° 阈值"
+    },
+    "moderate_angle_visible": {
+      "sat_lat": 36.0, "sat_lon": 139.0, "sat_alt_m": 500000,
+      "gs_lat": 35.0, "gs_lon": 139.0,
+      "min_elevation": 10,
+      "expected": true,
+      "note": "地心角约 1°，仰角约 12.5°，高于 10° 阈值"
+    },
+    "large_angle_below_threshold": {
+      "sat_lat": 95.0, "sat_lon": 139.0, "sat_alt_m": 500000,
+      "gs_lat": 35.0, "gs_lon": 139.0,
+      "min_elevation": 10,
+      "expected": false,
+      "note": "地心角约 60°，仰角约 3.7°，低于 10° 阈值"
+    }
+  },
+  "check_geo_visibility": {
+    "same_position": {
+      "leo_lat": 0.0, "leo_lon": 0.0, "leo_alt_m": 500000,
+      "geo_lat": 0.0, "geo_lon": 0.0, "geo_alt_m": 35786000,
+      "expected": true,
+      "note": "角度 = 0°，远小于 80° 阈值"
+    },
+    "angle_79_visible": {
+      "leo_lat": 0.0, "leo_lon": 0.0, "leo_alt_m": 500000,
+      "geo_lat": 0.0, "geo_lon": 79.0, "geo_alt_m": 35786000,
+      "expected": true,
+      "note": "角度 = 79°，恰好低于 80° 阈值"
+    },
+    "angle_81_not_visible": {
+      "leo_lat": 0.0, "leo_lon": 0.0, "leo_alt_m": 500000,
+      "geo_lat": 0.0, "geo_lon": 81.0, "geo_alt_m": 35786000,
+      "expected": false,
+      "note": "角度 = 81°，超过 80° 阈值"
+    },
+    "angle_90_not_visible": {
+      "leo_lat": 0.0, "leo_lon": 0.0, "leo_alt_m": 500000,
+      "geo_lat": 0.0, "geo_lon": 90.0, "geo_alt_m": 35786000,
+      "expected": false,
+      "note": "角度 = 90°，远超 80° 阈值"
+    }
+  }
+}
