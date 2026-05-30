@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 
+from backend.__about__ import __version__
 from backend.logging_config import get_logger
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -740,6 +741,7 @@ def health_check():
     return jsonify({
         'success': True,
         'service': 'smartnode-backend',
+        'version': __version__,
         'mode': 'open-api',
         'frontend': '/frontend/',
         'simulation_running': simulation_engine.running
@@ -753,11 +755,24 @@ def liveness_probe():
 
 
 @app.route('/api/readyz')
+@app.route('/api/ready')
 def readiness_probe():
-    """就绪探针：仿真线程存活才视为就绪，否则 503。"""
+    """就绪探针：仿真线程存活才视为就绪，否则 503。
+
+    同时挂载 /api/ready（K8s / Compose 约定俗成的短路径）与 /api/readyz。
+    校验逻辑：仿真引擎 running 标志为真且后台线程存活，才认为服务就绪。
+    非就绪时返回 HTTP 503，供 K8s livenessProbe / readinessProbe 与
+    Alertmanager dead_man_switch 规则使用。
+    """
     thread = simulation_engine.simulation_thread
-    ready = bool(simulation_engine.running and thread and thread.is_alive())
-    body = {'status': 'ready' if ready else 'not_ready', 'simulation_running': simulation_engine.running}
+    thread_alive = bool(thread and thread.is_alive())
+    ready = bool(simulation_engine.running and thread_alive)
+    body = {
+        'status': 'ready' if ready else 'not_ready',
+        'simulation_running': simulation_engine.running,
+        'simulation_thread_alive': thread_alive,
+        'version': __version__,
+    }
     return (jsonify(body), 200) if ready else (jsonify(body), 503)
 
 
