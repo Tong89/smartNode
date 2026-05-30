@@ -25,6 +25,7 @@ from backend.physics.coordinates import ecef_to_lla, eci_to_ecef, lla_to_ecef
 from backend import orbit
 from backend.orbit import OrbitalElements, calc_central_angle
 from backend.scheduling.handover import HandoverController
+from backend.resources import ResourceManager
 
 logger = logging.getLogger("smartnode")
 
@@ -348,6 +349,15 @@ class TransmissionRequest:
 # ==========================================
 class SimulationEngine:
     """仿真引擎核心 - 管理卫星、地面站、传输任务"""
+
+    @property
+    def resource_usage(self):
+        return self._resources.usage
+
+    @property
+    def resource_time_pool(self):
+        return self._resources.time_pool
+
     
     def __init__(self, ground_station_count=DEFAULT_GROUND_STATION_COUNT, leo_satellite_count=DEFAULT_LEO_SATELLITE_COUNT):
         self.current_time = 0.0
@@ -373,28 +383,9 @@ class SimulationEngine:
         self.transmission_requests = []
         self.request_history = []
 
-        # 资源占用跟踪（简单版）
-        self.resource_usage = {
-            "satellites": {},    # {sat_id: [req_ids]}
-            "ground_stations": {},  # {gs_id: [req_ids]}
-            "geo_relays": {}     # {geo_id: [req_ids]}
-        }
-        
-        # ⭐ 新增：时间维度资源池（记录每个资源在各时间段的占用情况）
-        # 结构: {resource_id: [(start_time, end_time, req_id, bandwidth), ...]}
-        self.resource_time_pool = {
-            "satellites": {},      # 卫星时间占用
-            "ground_stations": {}, # 地面站时间占用
-            "geo_relays": {}       # 中继星时间占用
-        }
-        
-        # 初始化资源池
-        for sat in self.leo_satellites:
-            self.resource_time_pool["satellites"][sat.sat_id] = []
-        for gs in self.all_ground_stations:
-            self.resource_time_pool["ground_stations"][gs["id"]] = []
-        for geo in self.geo_relays:
-            self.resource_time_pool["geo_relays"][geo["id"]] = []
+        # 资源占用与时间槽统一由 ResourceManager 管理
+        self._resources = ResourceManager()
+        self._resources.init_pools(self.leo_satellites, self.all_ground_stations, self.geo_relays)
         
         # 链路切换控制器（迟滞 + 最小驻留 + 冷却，统一约束所有切换）
         self.handover = HandoverController(
@@ -447,16 +438,7 @@ class SimulationEngine:
             self.transmission_requests.clear()
             self.request_history.clear()
             TransmissionRequest._id_counter = 0
-            self.resource_usage = {
-                "satellites": {},
-                "ground_stations": {},
-                "geo_relays": {}
-            }
-            self.resource_time_pool = {
-                "satellites": {sat.sat_id: [] for sat in self.leo_satellites},
-                "ground_stations": {gs["id"]: [] for gs in self.all_ground_stations},
-                "geo_relays": {geo["id"]: [] for geo in self.geo_relays}
-            }
+            self._resources.reset(self.leo_satellites, self.all_ground_stations, self.geo_relays)
             self.stats.update({
                 "total_requests": 0,
                 "user_requests": 0,
@@ -734,121 +716,22 @@ class SimulationEngine:
     # ==========================================
     
     def _check_time_slot_available(self, resource_type, resource_id, start_time, end_time, required_bandwidth=0):
-        """
-        检查指定资源在指定时间段内是否可用
-        
-        Args:
-            resource_type: "satellites", "ground_stations", "geo_relays"
-            resource_id: 资源ID
-            start_time: 开始时间（仿真时间）
-            end_time: 结束时间（仿真时间）
-            required_bandwidth: 需要的带宽（仅对中继有效）
-        
-        Returns:
-            (bool, str): (是否可用, 原因)
-        """
-        if resource_type not in self.resource_time_pool:
-            return False, "无效的资源类型"
-        
-        if resource_id not in self.resource_time_pool[resource_type]:
-            return False, f"资源 {resource_id} 不存在"
-        
-        time_slots = self.resource_time_pool[resource_type][resource_id]
-        
-        # 检查时间段冲突
-        for slot in time_slots:
-            slot_start, slot_end, req_id, slot_bw = slot
-            
-            # 检查是否有时间重叠
-            if not (end_time <= slot_start or start_time >= slot_end):
-                # 对于中继，检查带宽是否超限
-                if resource_type == "geo_relays":
-                    geo = next((g for g in self.geo_relays if g["id"] == resource_id), None)
-                    if geo:
-                        max_bw = geo.get("bandwidth", 2000)
-                        # 计算该时间段内已占用带宽
-                        used_bw = sum(s[3] for s in time_slots 
-                                     if not (end_time <= s[0] or start_time >= s[1]))
-                        if used_bw + required_bandwidth > max_bw:
-                            return False, f"中继 {resource_id} 带宽不足 (已用:{used_bw:.0f}, 需要:{required_bandwidth:.0f}, 上限:{max_bw})"
-                else:
-                    # 卫星和地面站：时间段冲突即不可用
-                    return False, f"资源 {resource_id} 在时间段 {slot_start:.0f}-{slot_end:.0f} 已被 {req_id} 占用"
-        
-        return True, "可用"
-    
+        return self._resources.check_time_slot_available(
+            resource_type, resource_id, start_time, end_time, required_bandwidth, geo_relays=self.geo_relays
+        )
+
     def _reserve_time_slot(self, resource_type, resource_id, start_time, end_time, req_id, bandwidth=0):
-        """
-        预约资源时间段
-        
-        Args:
-            resource_type: 资源类型
-            resource_id: 资源ID
-            start_time: 开始时间
-            end_time: 结束时间
-            req_id: 请求ID
-            bandwidth: 占用带宽
-        """
-        if resource_type in self.resource_time_pool and resource_id in self.resource_time_pool[resource_type]:
-            self.resource_time_pool[resource_type][resource_id].append(
-                (start_time, end_time, req_id, bandwidth)
-            )
-    
+        self._resources.reserve_time_slot(resource_type, resource_id, start_time, end_time, req_id, bandwidth)
+
     def _release_time_slot(self, req_id):
-        """
-        释放指定请求占用的所有时间段
-        
-        Args:
-            req_id: 请求ID
-        """
-        for resource_type in self.resource_time_pool:
-            for resource_id in self.resource_time_pool[resource_type]:
-                self.resource_time_pool[resource_type][resource_id] = [
-                    slot for slot in self.resource_time_pool[resource_type][resource_id]
-                    if slot[2] != req_id
-                ]
-    
+        self._resources.release_time_slot(req_id)
+
     def _cleanup_expired_time_slots(self):
-        """清理已过期的时间段占用"""
-        current_time = self.current_time
-        for resource_type in self.resource_time_pool:
-            for resource_id in self.resource_time_pool[resource_type]:
-                self.resource_time_pool[resource_type][resource_id] = [
-                    slot for slot in self.resource_time_pool[resource_type][resource_id]
-                    if slot[1] > current_time  # 保留结束时间大于当前时间的
-                ]
-    
+        self._resources.cleanup_expired(self.current_time)
+
     def _get_resource_schedule(self, resource_type, resource_id, time_range=3600):
-        """
-        获取资源的时间占用计划
-        
-        Args:
-            resource_type: 资源类型
-            resource_id: 资源ID  
-            time_range: 查看的时间范围（秒）
-        
-        Returns:
-            list: 时间占用列表
-        """
-        if resource_type not in self.resource_time_pool:
-            return []
-        if resource_id not in self.resource_time_pool[resource_type]:
-            return []
-        
-        current_time = self.current_time
-        end_time = current_time + time_range
-        
-        return [
-            {
-                "start": slot[0],
-                "end": slot[1],
-                "request_id": slot[2],
-                "bandwidth": slot[3]
-            }
-            for slot in self.resource_time_pool[resource_type][resource_id]
-            if slot[1] > current_time and slot[0] < end_time
-        ]
-    
+        return self._resources.get_schedule(resource_type, resource_id, self.current_time, time_range)
+
     def _estimate_transmission_time(self, data_size_mb, rate_mbps):
         """估算传输时间（秒）"""
         if rate_mbps <= 0:
@@ -1909,63 +1792,14 @@ class SimulationEngine:
         return available_bandwidth >= required_rate
     
     def _occupy_resources(self, req_id, sat_id, gs_id, relay_id=None, relay2_id=None, start_time=None, end_time=None):
-        """标记资源为占用状态，同时预留时间槽"""
-        if sat_id not in self.resource_usage["satellites"]:
-            self.resource_usage["satellites"][sat_id] = []
-        if req_id not in self.resource_usage["satellites"][sat_id]:
-            self.resource_usage["satellites"][sat_id].append(req_id)
-        
-        if gs_id:
-            if gs_id not in self.resource_usage["ground_stations"]:
-                self.resource_usage["ground_stations"][gs_id] = []
-            if req_id not in self.resource_usage["ground_stations"][gs_id]:
-                self.resource_usage["ground_stations"][gs_id].append(req_id)
-        
-        if relay_id:
-            if relay_id not in self.resource_usage["geo_relays"]:
-                self.resource_usage["geo_relays"][relay_id] = []
-            if req_id not in self.resource_usage["geo_relays"][relay_id]:
-                self.resource_usage["geo_relays"][relay_id].append(req_id)
-        
-        if relay2_id:
-            if relay2_id not in self.resource_usage["geo_relays"]:
-                self.resource_usage["geo_relays"][relay2_id] = []
-            if req_id not in self.resource_usage["geo_relays"][relay2_id]:
-                self.resource_usage["geo_relays"][relay2_id].append(req_id)
-        
-        # ⭐ 新增：预留时间槽
-        if start_time is not None and end_time is not None:
-            # 预留卫星时间槽
-            self._reserve_time_slot("satellites", sat_id, start_time, end_time, req_id)
-            # 预留地面站时间槽
-            if gs_id:
-                self._reserve_time_slot("ground_stations", gs_id, start_time, end_time, req_id)
-            # 预留中继时间槽
-            if relay_id:
-                self._reserve_time_slot("geo_relays", relay_id, start_time, end_time, req_id)
-            if relay2_id:
-                self._reserve_time_slot("geo_relays", relay2_id, start_time, end_time, req_id)
-    
-    def _occupy_satellite_only(self, req_id, sat_id):
-        """仅标记卫星资源为占用(用于等待过境的原始影像)"""
-        if sat_id not in self.resource_usage["satellites"]:
-            self.resource_usage["satellites"][sat_id] = []
-        self.resource_usage["satellites"][sat_id].append(req_id)
-    
-    def _release_resources(self, req_id):
-        """释放资源占用和时间槽"""
-        for resource_dict in self.resource_usage.values():
-            for resource_id, req_list in list(resource_dict.items()):
-                if req_id in req_list:
-                    req_list.remove(req_id)
-                # 清理空列表
-                if len(req_list) == 0:
-                    del resource_dict[resource_id]
-        
-        # ⭐ 新增：释放时间槽
-        self._release_time_slot(req_id)
+        self._resources.occupy(req_id, sat_id, gs_id, relay_id, relay2_id, start_time, end_time)
 
-    
+    def _occupy_satellite_only(self, req_id, sat_id):
+        self._resources.occupy_satellite_only(req_id, sat_id)
+
+    def _release_resources(self, req_id):
+        self._resources.release(req_id)
+
     def _calculate_direct_rate(self, sat_pos, gs, data_type=None):
         return orbit.calculate_direct_rate(sat_pos, gs, data_type)
     
