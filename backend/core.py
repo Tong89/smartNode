@@ -2469,26 +2469,40 @@ class SimulationEngine:
             return False
     
     def update_leo_satellite_count(self, new_count):
-        """⭐ 更新LEO卫星数量 - 轨道参数预先已知，位置可实时计算"""
+        """⭐ 更新LEO卫星数量 - 轨道参数预先已知，支持动态生成补充，无上限。
+
+        合并自此前两份重复定义：保留动态生成（_generate_random_leo）与减少时的
+        _handle_removed_satellites 处理，并按前后激活列表的 ID 差集精确计算被移除卫星。
+        """
         with self.lock:
-            # 验证范围（只限制最小值）
-            new_count = max(MIN_LEO_SATELLITE_COUNT, new_count)
-            
-            if new_count != self.leo_satellite_count:
-                old_count = self.leo_satellite_count
-                self.leo_satellite_count = new_count
-                
-                # 从预定义的轨道中选择前N颗卫星
-                # 轨道参数已知，位置通过propagate()方法实时计算
-                self.leo_satellites = self.all_leo_satellites[:self.leo_satellite_count]
-                
-                # 如果减少卫星，需要处理被移除卫星上的请求
-                if new_count < old_count:
-                    removed_sat_ids = [sat.sat_id for sat in self.all_leo_satellites[new_count:old_count]]
+            # 仅验证最小值
+            new_count = max(MIN_LEO_SATELLITE_COUNT, int(new_count))
+
+            old_count = len(self.leo_satellites)
+            old_ids = [sat.sat_id for sat in self.leo_satellites]
+            if new_count == old_count:
+                return False
+
+            # 新数量超过库存时动态生成补充
+            current_total = len(self.all_leo_satellites)
+            if new_count > current_total:
+                for i in range(new_count - current_total):
+                    self.all_leo_satellites.append(
+                        self._generate_random_leo(current_total + i + 1)
+                    )
+
+            # 更新激活的卫星列表（轨道参数已知，位置实时计算）
+            self.leo_satellite_count = new_count
+            self.leo_satellites = self.all_leo_satellites[:self.leo_satellite_count]
+
+            # 减少卫星时，按前后激活 ID 差集精确处理被移除卫星上的请求
+            if new_count < old_count:
+                active_ids = set(sat.sat_id for sat in self.leo_satellites)
+                removed_sat_ids = [sid for sid in old_ids if sid not in active_ids]
+                if removed_sat_ids:
                     self._handle_removed_satellites(removed_sat_ids)
-                
-                return True
-            return False
+
+            return True
     
     def _handle_removed_satellites(self, removed_sat_ids):
         """处理被移除卫星上的请求 - 重新分配或拒绝"""
@@ -2632,49 +2646,6 @@ class SimulationEngine:
             arg_perigee=0, 
             mean_anomaly=mean_anomaly
         )
-
-    def update_leo_satellite_count(self, new_count):
-        """⭐ 更新LEO卫星数量 - 支持动态生成，无上限"""
-        with self.lock:
-            # 仅验证最小值
-            new_count = max(MIN_LEO_SATELLITE_COUNT, int(new_count))
-            
-            old_count = len(self.leo_satellites)
-            
-            # 如果新数量大于当前总库存，动态生成补充
-            current_total = len(self.all_leo_satellites)
-            if new_count > current_total:
-                needed = new_count - current_total
-                for i in range(needed):
-                    # 生成新卫星并加入总库
-                    new_sat = self._generate_random_leo(current_total + i + 1)
-                    self.all_leo_satellites.append(new_sat)
-            
-            # 更新当前激活的卫星列表
-            self.leo_satellite_count = new_count
-            self.leo_satellites = self.all_leo_satellites[:self.leo_satellite_count]
-            
-            # 如果减少卫星，需要处理被移除卫星上的请求
-            if new_count < old_count:
-                # 获取被移除的卫星ID集合
-                active_ids = set(s.sat_id for s in self.leo_satellites)
-                removed_ids = []
-                # 检查之前的卫星是否还在新列表中
-                # 注意：这里逻辑简化，假设是按顺序截断
-                # 如果要精确处理，应该对比前后列表的ID
-                
-                # 重新计算被移除的ID
-                # 实际上由于是切片操作，被移除的一定是索引 >= new_count 的
-                # 但为了安全，我们遍历资源占用表
-                
-                for sat_id in list(self.resource_usage["satellites"].keys()):
-                    if sat_id not in active_ids:
-                        removed_ids.append(sat_id)
-                        
-                if removed_ids:
-                    self._handle_removed_satellites(removed_ids)
-            
-            return True
 
 # 全局仿真引擎实例
 simulation_engine = SimulationEngine()
