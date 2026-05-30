@@ -1,0 +1,38 @@
+# prometheus.yml — Prometheus scrape configuration for SmartNode
+#
+# Used when starting the monitoring profile:
+#   docker compose --profile monitoring up -d
+#
+# Prometheus UI: http://localhost:9090
+# Grafana UI:    http://localhost:3000  (admin/admin)
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+  external_labels:
+    cluster: "smartnode-local"
+    environment: "development"
+
+# Alertmanager configuration (optional — set up your own Alertmanager)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+scrape_configs:
+  # SmartNode backend /metrics endpoint
+  - job_name: "smartnode"
+    static_configs:
+      - targets: ["smartnode:5000"]
+        labels:
+          service: "smartnode-backend"
+    metrics_path: /metrics
+    scheme: http
+    scrape_interval: 10s
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
