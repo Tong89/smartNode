@@ -188,6 +188,11 @@ const app = Vue.createApp({
         'Content-Type': 'application/json',
         ...(options.headers || {}),
       };
+      // 登录后自动在请求头携带 JWT（来自 localStorage）
+      const token = (typeof localStorage !== 'undefined') ? localStorage.getItem('smartnode_token') : null;
+      if (token && !headers['Authorization']) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const response = await fetch(this.apiUrl(path), {
         ...options,
         headers,
