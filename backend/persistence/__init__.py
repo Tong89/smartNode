@@ -1,0 +1,1 @@
+"""SmartNode persistence layer."""
