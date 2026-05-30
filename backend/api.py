@@ -372,6 +372,20 @@ def get_resource_status():
         # =========================================
         # 4. 汇总统计
         # =========================================
+        # 整体利用率：仅对非空资源类别按权重加权并重新归一，
+        # 避免任一类别数量为 0 时整体利用率被错误置 0。
+        _util_terms = []
+        if total_sats > 0:
+            _util_terms.append((0.5, busy_sats / total_sats))
+        if total_gs > 0:
+            _util_terms.append((0.3, busy_gs / total_gs))
+        if total_geo > 0:
+            _util_terms.append((0.2, busy_geo / total_geo))
+        _weight_sum = sum(w for w, _ in _util_terms)
+        overall_utilization = (
+            sum(w * u for w, u in _util_terms) / _weight_sum if _weight_sum > 0 else 0
+        )
+
         result["summary"] = {
             # 卫星（天基）
             "satellites_total": total_sats,
@@ -393,11 +407,8 @@ def get_resource_status():
             "geo_relays_idle": total_geo - busy_geo,
             "geo_relays_utilization": round(busy_geo / total_geo * 100, 1) if total_geo > 0 else 0,
             
-            # 整体利用率（加权平均）
-            "overall_utilization": round(
-                (busy_sats / total_sats * 0.5 + busy_gs / total_gs * 0.3 + busy_geo / total_geo * 0.2) * 100
-                if total_sats > 0 and total_gs > 0 and total_geo > 0 else 0, 1
-            )
+            # 整体利用率（按非空类别动态归一的加权平均）
+            "overall_utilization": round(overall_utilization * 100, 1)
         }
         
         return jsonify(result)
