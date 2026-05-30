@@ -1,0 +1,33 @@
+[project]
+name = "smartnode"
+version = "1.1.0"
+description = "天基智枢 SmartNode 卫星中继仿真平台"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["dist", "build", "frontend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+extend-exclude = "frontend"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = false
+check_untyped_defs = false
+files = ["backend"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,31 @@
+name: quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          pip install ruff black mypy pytest
+      - name: Ruff
+        run: ruff check backend
+      - name: Black (check)
+        run: black --check backend
+      - name: Mypy
+        run: mypy backend || true
+      - name: Pytest
+        run: pytest
