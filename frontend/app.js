@@ -69,6 +69,17 @@ const app = Vue.createApp({
       compareNameB: '',
       compareReport: null,
       comparing: false,
+      // 请求列表分页与过滤
+      reqPage: 1,
+      reqPageSize: 20,
+      reqTotal: 0,
+      reqHasNext: false,
+      reqItems: [],        // 当前页数据（来自 /api/v1/requests）
+      reqFilterStatus: '',
+      reqFilterDataType: '',
+      reqFilterSatelliteId: '',
+      reqSort: '-id',
+      reqLoading: false,
     };
   },
 
@@ -98,6 +109,10 @@ const app = Vue.createApp({
     },
 
     requests() {
+      // 优先使用分页接口数据；若尚未加载则回退到 systemData.requests（Cesium 场景渲染用）
+      if (this.reqItems.length > 0 || this.reqTotal > 0) {
+        return this.reqItems;
+      }
       const rows = Array.isArray(this.systemData.requests) ? this.systemData.requests : [];
       return rows
         .filter((req) => req.source !== 'background')
@@ -105,8 +120,18 @@ const app = Vue.createApp({
         .sort((a, b) => String(b.id || '').localeCompare(String(a.id || '')));
     },
 
+    // 用于 Cesium 场景渲染的实时活跃请求（不受分页影响）
+    activeRequestsForScene() {
+      const rows = Array.isArray(this.systemData.requests) ? this.systemData.requests : [];
+      return rows.filter((req) => req.source !== 'background');
+    },
+
     recentRequests() {
       return this.requests.slice(0, 8);
+    },
+
+    reqTotalPages() {
+      return this.reqPageSize > 0 ? Math.max(1, Math.ceil(this.reqTotal / this.reqPageSize)) : 1;
     },
 
     satelliteCount() {
@@ -147,7 +172,11 @@ const app = Vue.createApp({
     this.initCesium();
     this.refreshAll();
     this.refreshScenarios();
-    this.refreshTimer = window.setInterval(this.refreshAll, 2000);
+    this.refreshRequestList();
+    this.refreshTimer = window.setInterval(() => {
+      this.refreshAll();
+      this.refreshRequestList();
+    }, 2000);
     window.addEventListener('resize', this.resizeViewer);
   },
 
@@ -263,6 +292,66 @@ const app = Vue.createApp({
       }
     },
 
+    // ── 分页请求列表 ─────────────────────────────────────────────
+    async refreshRequestList() {
+      this.reqLoading = true;
+      try {
+        const params = new URLSearchParams();
+        params.set('page', String(this.reqPage));
+        params.set('page_size', String(this.reqPageSize));
+        params.set('sort', this.reqSort);
+        if (this.reqFilterStatus) params.set('status', this.reqFilterStatus);
+        if (this.reqFilterDataType) params.set('data_type', this.reqFilterDataType);
+        if (this.reqFilterSatelliteId) params.set('satellite_id', this.reqFilterSatelliteId);
+
+        // fetchJson 对统一包络自动解包，返回 data 字段（即 items 数组）
+        // 但这里需要同时获取 meta，需要绕过自动解包
+        const url = `/api/v1/requests?${params.toString()}`;
+        const resp = await fetch(this.apiUrl(url), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const payload = await resp.json();
+        if (payload && payload.code === 0) {
+          this.reqItems = Array.isArray(payload.data) ? payload.data : [];
+          const meta = payload.meta || {};
+          this.reqTotal = Number(meta.total || 0);
+          this.reqHasNext = Boolean(meta.has_next);
+        }
+      } catch (e) {
+        this.setNotice('请求列表加载失败: ' + (e.message || e), 'error');
+      } finally {
+        this.reqLoading = false;
+      }
+    },
+
+    async reqGoPage(page) {
+      if (page < 1 || page > this.reqTotalPages) return;
+      this.reqPage = page;
+      await this.refreshRequestList();
+    },
+
+    async reqPrevPage() {
+      if (this.reqPage > 1) await this.reqGoPage(this.reqPage - 1);
+    },
+
+    async reqNextPage() {
+      if (this.reqHasNext) await this.reqGoPage(this.reqPage + 1);
+    },
+
+    async applyReqFilters() {
+      this.reqPage = 1;
+      await this.refreshRequestList();
+    },
+
+    resetReqFilters() {
+      this.reqFilterStatus = '';
+      this.reqFilterDataType = '';
+      this.reqFilterSatelliteId = '';
+      this.reqSort = '-id';
+      this.reqPage = 1;
+      this.refreshRequestList();
+    },
+
     syncResourceForm() {
       if (this.resourceFormReady) return;
       this.resourceForm.ground_station_count = Number(this.systemInfo.ground_station_count || this.groundStationCount || 0);
@@ -368,7 +457,7 @@ const app = Vue.createApp({
         });
       });
 
-      this.requests
+      this.activeRequestsForScene
         .filter((req) => req.status === 'transmitting')
         .slice(0, 24)
         .forEach((req) => {

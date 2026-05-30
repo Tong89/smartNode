@@ -2013,6 +2013,88 @@ class SimulationEngine:
             # 只返回用户请求，过滤掉背景任务
             user_reqs = [req for req in all_reqs if req.source == "user"]
             return [req.to_dict() for req in user_reqs]
+
+    def get_requests_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        status: str | None = None,
+        data_type: str | None = None,
+        satellite_id: str | None = None,
+        source: str | None = None,
+        sort: str = "-id",
+    ) -> dict:
+        """返回带分页、过滤与排序的请求列表。
+
+        Args:
+            page: 页码（从 1 开始）
+            page_size: 每页条目数（1-200）
+            status: 按状态过滤（pending/accepted/transmitting/completed/rejected）
+            data_type: 按数据类型过滤
+            satellite_id: 按卫星 ID 过滤
+            source: 按来源过滤（user/background）
+            sort: 排序字段，前缀 "-" 表示降序；支持 id/submit_time/priority/status
+
+        Returns:
+            {
+                "items": [...],
+                "meta": {"total": N, "page": P, "page_size": PS, "has_next": bool}
+            }
+        """
+        VALID_SORT_FIELDS = {"id", "submit_time", "priority", "status"}
+
+        # 在锁内做快照切片，减小序列化开销
+        with self.lock:
+            all_reqs = list(self.transmission_requests) + list(self.request_history)
+
+            # 过滤
+            if status is not None:
+                all_reqs = [r for r in all_reqs if r.status == status]
+            if data_type is not None:
+                all_reqs = [r for r in all_reqs if r.data_type == data_type]
+            if satellite_id is not None:
+                all_reqs = [r for r in all_reqs if r.satellite_id == satellite_id]
+            if source is not None:
+                all_reqs = [r for r in all_reqs if r.source == source]
+
+            total = len(all_reqs)
+
+            # 排序
+            descending = sort.startswith("-")
+            field = sort.lstrip("-")
+            if field not in VALID_SORT_FIELDS:
+                field = "id"
+            if field == "id":
+                # REQ_NNNN — 按数值部分排序
+                def _key_id(r):
+                    try:
+                        return int(r.id.split("_", 1)[1])
+                    except (IndexError, ValueError):
+                        return 0
+                all_reqs.sort(key=_key_id, reverse=descending)
+            elif field == "submit_time":
+                all_reqs.sort(key=lambda r: (r.submit_time or 0), reverse=descending)
+            elif field == "priority":
+                all_reqs.sort(key=lambda r: (r.priority or 0), reverse=descending)
+            elif field == "status":
+                all_reqs.sort(key=lambda r: r.status, reverse=descending)
+
+            # 分页切片（在锁内进行，避免序列化 len(all_reqs) 个对象）
+            offset = (page - 1) * page_size
+            page_reqs = all_reqs[offset: offset + page_size]
+
+        # 锁外序列化（耗时操作）
+        items = [r.to_dict() for r in page_reqs]
+
+        return {
+            "items": items,
+            "meta": {
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "has_next": offset + page_size < total,
+            },
+        }
     
     def get_system_data(self):
         """获取系统完整数据 - 优化锁持有时间"""

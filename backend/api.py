@@ -176,6 +176,96 @@ def get_all_transmission_requests():
     return jsonify(simulation_engine.get_all_requests())
 
 
+# ──────────────────────────────────────────────────────────────
+# /api/v1/requests  — 分页 + 过滤 + 排序（v1 专用，不走别名注册）
+# ──────────────────────────────────────────────────────────────
+VALID_STATUSES = {"pending", "accepted", "transmitting", "completed", "rejected"}
+VALID_SORT_PARAMS = {
+    "id", "-id",
+    "submit_time", "-submit_time",
+    "priority", "-priority",
+    "status", "-status",
+}
+
+
+def _parse_positive_int(raw, name: str, default: int, maximum: int = 200):
+    """将查询参数解析为正整数，非法时返回校验错误响应（None 表示解析成功）。"""
+    if raw is None:
+        return default, None
+    try:
+        value = int(raw)
+    except (ValueError, TypeError):
+        return None, ({"field": name, "message": "须为整数"}, 400)
+    if value < 1:
+        return None, ({"field": name, "message": "须为正整数（≥1）"}, 400)
+    if value > maximum:
+        return None, ({"field": name, "message": f"不得超过 {maximum}"}, 400)
+    return value, None
+
+
+@app.route('/api/v1/requests', methods=['GET'])
+def get_requests_paginated():
+    """分页、过滤与排序的请求列表接口。
+
+    Query Parameters:
+        page         (int, ≥1, default=1)
+        page_size    (int, 1-200, default=20)
+        status       (pending|accepted|transmitting|completed|rejected)
+        data_type    (str)
+        satellite_id (str)
+        source       (user|background)
+        sort         (id|-id|submit_time|-submit_time|priority|-priority|status|-status)
+                     默认 -id（最新优先）
+    """
+    # ── 解析并校验 page / page_size ──────────────────────────
+    page, err = _parse_positive_int(request.args.get("page"), "page", 1)
+    if err is not None:
+        field_err, _ = err
+        return error_response("VALIDATION_ERROR", message=field_err["message"],
+                              details=[field_err])
+
+    page_size, err = _parse_positive_int(
+        request.args.get("page_size"), "page_size", 20, maximum=200
+    )
+    if err is not None:
+        field_err, _ = err
+        return error_response("VALIDATION_ERROR", message=field_err["message"],
+                              details=[field_err])
+
+    # ── 枚举校验 ─────────────────────────────────────────────
+    status_filter = request.args.get("status")
+    if status_filter is not None and status_filter not in VALID_STATUSES:
+        return error_response(
+            "VALIDATION_ERROR",
+            message=f"status 取值不合法，支持：{', '.join(sorted(VALID_STATUSES))}",
+            details=[{"field": "status", "message": "取值不在允许列表内"}],
+        )
+
+    sort_param = request.args.get("sort", "-id")
+    if sort_param not in VALID_SORT_PARAMS:
+        return error_response(
+            "VALIDATION_ERROR",
+            message=f"sort 取值不合法，支持：{', '.join(sorted(VALID_SORT_PARAMS))}",
+            details=[{"field": "sort", "message": "取值不在允许列表内"}],
+        )
+
+    data_type_filter = request.args.get("data_type") or None
+    satellite_id_filter = request.args.get("satellite_id") or None
+    source_filter = request.args.get("source") or None
+
+    result = simulation_engine.get_requests_paginated(
+        page=page,
+        page_size=page_size,
+        status=status_filter,
+        data_type=data_type_filter,
+        satellite_id=satellite_id_filter,
+        source=source_filter,
+        sort=sort_param,
+    )
+
+    return ok(result["items"], meta=result["meta"])
+
+
 @app.route('/api/all_requests_with_background')
 def get_all_requests_with_background():
     """获取所有请求（包括背景任务）- 用于资源时间线可视化"""
