@@ -9,7 +9,7 @@
  */
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import type { SystemData, Satellite, GroundStation, GeoRelay, TransmissionRequest, ResourceTimeline } from '../types/api';
+import type { SystemData, Satellite, GroundStation, GeoRelay, TransmissionRequest, ResourceTimeline, ResourceUtilization, DecisionMetrics } from '../types/api';
 import { apiClient } from '../api/client';
 import {
   fetchHealth,
@@ -59,6 +59,10 @@ export const useSimulationStore = defineStore('simulation', () => {
   const systemInfo = ref<Record<string, unknown>>({});
   const resourceStatus = ref<Record<string, unknown>>({});
   const utilization = ref<Record<string, unknown>>({});
+  const resourceUtilization = ref<ResourceUtilization | null>(null);
+
+  /** Sliding window of throughput samples (last 20 polls) for sparkline */
+  const throughputHistory = ref<number[]>([]);
 
   const resourceTimeline = ref<ResourceTimeline | null>(null);
 
@@ -119,6 +123,27 @@ export const useSimulationStore = defineStore('simulation', () => {
     }));
   });
 
+  /** Typed decision metrics from the last /api/resource_utilization fetch */
+  const decisionMetrics = computed<DecisionMetrics>(() => {
+    const dm = resourceUtilization.value?.decision_metrics;
+    return {
+      acceptance_rate: dm?.acceptance_rate ?? 0,
+      completion_rate: dm?.completion_rate ?? 0,
+      avg_scheduling_time: dm?.avg_scheduling_time ?? 0,
+      avg_transmission_time: dm?.avg_transmission_time ?? 0,
+      throughput_mbps: dm?.throughput_mbps ?? 0,
+      total_scheduling_time: dm?.total_scheduling_time ?? 0,
+      total_transmission_time: dm?.total_transmission_time ?? 0,
+      scheduling_count: dm?.scheduling_count ?? 0,
+      transmission_count: dm?.transmission_count ?? 0,
+    };
+  });
+
+  /** Rejection distribution map keyed by reason code */
+  const rejectionDistribution = computed<Record<string, number>>(
+    () => resourceUtilization.value?.rejection_distribution ?? {},
+  );
+
   const utilizationRows = computed(() => {
     const summary = (resourceStatus.value as { summary?: Record<string, unknown> }).summary || {};
     return [
@@ -136,7 +161,7 @@ export const useSimulationStore = defineStore('simulation', () => {
     if (refreshing.value) return;
     refreshing.value = true;
     try {
-      const [health, data, info, status, _util, timeline] = await Promise.allSettled([
+      const [health, data, info, status, util, timeline] = await Promise.allSettled([
         fetchHealth(),
         fetchData(),
         fetchSystemInfo(),
@@ -164,6 +189,13 @@ export const useSimulationStore = defineStore('simulation', () => {
 
       if (status.status === 'fulfilled') {
         resourceStatus.value = status.value || {};
+      }
+
+      if (util.status === 'fulfilled' && util.value) {
+        resourceUtilization.value = util.value;
+        // Maintain a sliding window of throughput samples for sparkline display
+        const mbps = util.value.decision_metrics?.throughput_mbps ?? 0;
+        throughputHistory.value = [...throughputHistory.value, mbps].slice(-20);
       }
 
       if (timeline.status === 'fulfilled') {
@@ -238,6 +270,8 @@ export const useSimulationStore = defineStore('simulation', () => {
     systemInfo,
     resourceStatus,
     utilization,
+    resourceUtilization,
+    throughputHistory,
     resourceTimeline,
     // getters
     systemTime,
@@ -254,6 +288,8 @@ export const useSimulationStore = defineStore('simulation', () => {
     geoRelayCount,
     dataTypeOptions,
     utilizationRows,
+    decisionMetrics,
+    rejectionDistribution,
     // actions
     refreshAll,
     startPolling,

@@ -53,6 +53,17 @@
           @refresh="simStore.refreshAll"
         />
 
+        <StatsChartsPanel
+          :visible="uiStore.activeView === 'stats'"
+          :accepted-requests="Number(simStore.stats.accepted_requests) || 0"
+          :rejected-requests="Number(simStore.stats.rejected_requests) || 0"
+          :total-requests="Number(simStore.stats.total_requests) || 0"
+          :decision-metrics="simStore.decisionMetrics"
+          :rejection-distribution="simStore.rejectionDistribution"
+          :throughput-history="simStore.throughputHistory"
+          @refresh="simStore.refreshAll"
+        />
+
         <UtilizationBars :rows="simStore.utilizationRows" />
 
         <RequestList :requests="simStore.recentRequests" />
@@ -76,6 +87,7 @@ import UtilizationBars from './components/UtilizationBars.vue';
 import RequestList from './components/RequestList.vue';
 import ScenarioPanel from './components/ScenarioPanel.vue';
 import GanttTimeline from './components/GanttTimeline.vue';
+import StatsChartsPanel from './components/StatsChartsPanel.vue';
 
 export default defineComponent({
   name: 'App',
@@ -90,6 +102,7 @@ export default defineComponent({
     RequestList,
     ScenarioPanel,
     GanttTimeline,
+    StatsChartsPanel,
   },
 
   setup() {
