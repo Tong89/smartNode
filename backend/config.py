@@ -21,6 +21,8 @@ AGING_MAX = 8.0
 RESOURCE_TIGHT_THRESHOLD = 0.95   # 平均利用率超过此值视为资源紧张
 HANDOVER_RATE_RATIO = 1.2         # 链路切换：新速率需高于当前速率的倍数
 HANDOVER_MIN_ELEVATION = 15       # 切换判定的最小仰角（防抖）
+HANDOVER_MIN_DWELL = 5.0          # 切换前最小驻留时间（秒）
+HANDOVER_COOLDOWN = 10.0          # 两次切换之间的冷却期（秒）
 
 # 基础链路速率 (Mbps)
 DIRECT_RATE_KA = 200
