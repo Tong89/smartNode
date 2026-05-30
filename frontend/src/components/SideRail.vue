@@ -18,6 +18,15 @@
       <i data-lucide="sliders-horizontal"></i>
       <span>资源</span>
     </button>
+    <button
+      :class="{ active: activeView === 'scenario' }"
+      type="button"
+      @click="$emit('set-view', 'scenario')"
+      title="场景"
+    >
+      <i data-lucide="bookmark"></i>
+      <span>场景</span>
+    </button>
   </nav>
 </template>
 

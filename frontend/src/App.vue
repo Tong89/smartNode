@@ -23,7 +23,7 @@
 
       <aside class="inspector">
         <RequestForm
-          :visible="uiStore.activeView !== 'resources'"
+          :visible="uiStore.activeView === 'requests'"
           v-model="requestForm"
           :leo-satellites="simStore.leoSatellites"
           :ground-stations="simStore.groundStations"
@@ -40,6 +40,11 @@
           @refresh="simStore.refreshAll"
           @update-ground-stations="updateGroundStations"
           @update-leo-satellites="updateLeoSatellites"
+        />
+
+        <ScenarioPanel
+          :visible="uiStore.activeView === 'scenario'"
+          @scenario-changed="simStore.refreshAll"
         />
 
         <UtilizationBars :rows="simStore.utilizationRows" />
@@ -63,6 +68,7 @@ import ResourcePanel from './components/ResourcePanel.vue';
 import type { ResourceFormData } from './components/ResourcePanel.vue';
 import UtilizationBars from './components/UtilizationBars.vue';
 import RequestList from './components/RequestList.vue';
+import ScenarioPanel from './components/ScenarioPanel.vue';
 
 export default defineComponent({
   name: 'App',
@@ -75,6 +81,7 @@ export default defineComponent({
     ResourcePanel,
     UtilizationBars,
     RequestList,
+    ScenarioPanel,
   },
 
   setup() {
