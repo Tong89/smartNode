@@ -1357,6 +1357,75 @@ def swagger_docs():
 
 
 # ==========================================
+# 调度决策轨迹 API
+# ==========================================
+
+@app.route('/api/decision_trace', methods=['GET'])
+def get_decision_traces():
+    """返回所有调度决策轨迹记录（有限长度环形缓冲，最多 500 条）。
+
+    可选查询参数：
+      - limit (int): 最多返回最近 N 条轨迹（默认返回全部）
+      - outcome (str): 按结果过滤，可取 "scheduled"、"rejected"、"rerouted"
+
+    返回 JSON 结构：
+      {
+        "total": <缓冲中总条数>,
+        "buffer_max": <缓冲上限>,
+        "traces": [ { ...DecisionTrace 字段... }, ... ]
+      }
+    """
+    with simulation_engine.lock:
+        buf = simulation_engine.decision_trace_buffer
+        traces = buf.list_all()
+
+    # 可选：按 outcome 过滤
+    outcome_filter = request.args.get("outcome")
+    if outcome_filter:
+        traces = [t for t in traces if t.outcome == outcome_filter]
+
+    # 可选：限制返回条数（取最近 N 条）
+    limit_str = request.args.get("limit")
+    if limit_str is not None:
+        try:
+            limit = int(limit_str)
+            if limit < 1:
+                return error_response("INVALID_PARAM", "limit 必须为正整数"), 400
+            traces = traces[-limit:]
+        except ValueError:
+            return error_response("INVALID_PARAM", "limit 必须为整数"), 400
+
+    return jsonify(ok({
+        "total": len(simulation_engine.decision_trace_buffer),
+        "buffer_max": simulation_engine.decision_trace_buffer.maxlen,
+        "traces": [t.to_dict() for t in traces],
+    }))
+
+
+@app.route('/api/decision_trace/<string:req_id>', methods=['GET'])
+def get_decision_trace_by_id(req_id):
+    """按请求 ID 查询单条调度决策轨迹。
+
+    路径参数：
+      - req_id: 请求 ID，如 "REQ_0001"
+
+    成功返回 200 + 轨迹 JSON；
+    未找到时返回 404 + 标准化错误。
+    """
+    with simulation_engine.lock:
+        buf = simulation_engine.decision_trace_buffer
+        trace = buf.get(req_id)
+
+    if trace is None:
+        return error_response(
+            "NOT_FOUND",
+            f"未找到请求 {req_id!r} 的决策轨迹（可能已超出环形缓冲上限或尚未被调度）"
+        ), 404
+
+    return jsonify(ok(trace.to_dict()))
+
+
+# ==========================================
 # 接口版本化：为每个 /api/<x> 注册 /api/v1/<x> 别名（保留旧路径兼容）
 # ==========================================
 def _register_v1_aliases():
