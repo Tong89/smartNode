@@ -2,6 +2,7 @@
 """Flask API and static frontend routes for SmartNode."""
 
 import logging
+import os
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -56,11 +57,27 @@ register_error_handlers(app)
 init_auth(app)
 
 
+# CORS 来源白名单（逗号分隔，环境变量配置）；默认仅本机回环
+ALLOWED_ORIGINS = {
+    o.strip()
+    for o in os.environ.get(
+        "SMARTNODE_CORS_ORIGINS",
+        "http://localhost:5000,http://127.0.0.1:5000",
+    ).split(",")
+    if o.strip()
+}
+
+
 @app.after_request
 def add_api_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    # 仅对白名单 Origin 回显放行，替代通配 '*'
+    origin = request.headers.get('Origin')
+    if origin and origin in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Vary'] = 'Origin'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-API-Key'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
     response.headers['Cache-Control'] = 'no-store'
     return response
 
@@ -694,7 +711,7 @@ def favicon():
     return '', 204
 
 
-def run(host='0.0.0.0', port=5000, debug=False):
+def run(host='127.0.0.1', port=5000, debug=False):
     simulation_engine.reset_requests()
     app.run(debug=debug, host=host, port=port, use_reloader=False, threaded=True)
 
