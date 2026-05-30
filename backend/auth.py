@@ -30,7 +30,8 @@ DEMO_USERS = {
 
 
 def jwt_secret():
-    return os.environ.get("SMARTNODE_JWT_SECRET", "dev-insecure-secret-change-me")
+    from backend.config import get_jwt_secret
+    return get_jwt_secret()
 
 
 def authenticate_user(username, password):

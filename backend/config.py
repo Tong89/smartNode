@@ -15,6 +15,50 @@ def debug_api_enabled():
     """是否开启调试接口（默认关闭）。生产环境不暴露内部状态。"""
     return os.environ.get("SMARTNODE_DEBUG_API", "").strip().lower() in ("1", "true", "yes", "on")
 
+
+# ==========================================
+# 环境变量集中配置（敏感项一律来自环境，不入库）
+# ==========================================
+def is_production():
+    return os.environ.get("SMARTNODE_ENV", "development").strip().lower() in ("prod", "production")
+
+
+def get_jwt_secret():
+    return os.environ.get("SMARTNODE_JWT_SECRET", "dev-insecure-secret-change-me")
+
+
+def get_api_key():
+    return os.environ.get("SMARTNODE_API_KEY")
+
+
+def get_cors_origins():
+    raw = os.environ.get("SMARTNODE_CORS_ORIGINS", "http://localhost:5000,http://127.0.0.1:5000")
+    return {o.strip() for o in raw.split(",") if o.strip()}
+
+
+def get_bind_host():
+    return os.environ.get("SMARTNODE_HOST", "127.0.0.1")
+
+
+def get_bind_port():
+    try:
+        return int(os.environ.get("SMARTNODE_PORT", "5000"))
+    except ValueError:
+        return 5000
+
+
+def validate_config():
+    """启动时校验：生产模式下必须显式提供密钥，缺失即拒启。返回告警列表。"""
+    problems = []
+    if is_production():
+        if get_jwt_secret() == "dev-insecure-secret-change-me":
+            problems.append("SMARTNODE_JWT_SECRET 未设置（生产环境必须提供强随机密钥）")
+        if not get_api_key():
+            problems.append("SMARTNODE_API_KEY 未设置（生产环境必须开启鉴权）")
+    if problems:
+        raise RuntimeError("配置校验失败:\n  - " + "\n  - ".join(problems))
+    return problems
+
 # 资源带宽上限 (Mbps)
 SATELLITE_MAX_BANDWIDTH = 600
 GS_MAX_BANDWIDTH = 1000
