@@ -1,0 +1,145 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly on Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+
+permissions:
+  contents: read
+  security-events: write  # Required to upload SARIF results to GitHub Security tab
+  actions: read           # Required for CodeQL and private repos
+
+jobs:
+  # ─── pip-audit: Scan Python dependencies for known CVEs ────────────────────
+  pip-audit:
+    name: pip-audit / dependency CVE scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit runtime dependencies for CVEs
+        # --strict causes a non-zero exit if any vulnerability is found (high or critical)
+        # --desc shows vulnerability descriptions for better triage
+        # --format json enables machine-readable output
+        run: |
+          pip-audit \
+            -r requirements.txt \
+            --strict \
+            --desc \
+            --format json \
+            --output pip-audit-results.json || EXIT_CODE=$?
+          # Always display results even if there are findings
+          pip-audit -r requirements.txt --desc || true
+          # Propagate failure if pip-audit found CVEs
+          exit ${EXIT_CODE:-0}
+
+      - name: Upload pip-audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-results
+          path: pip-audit-results.json
+          retention-days: 30
+
+  # ─── Trivy: Scan published GHCR image for CVEs ─────────────────────────────
+  trivy-image-scan:
+    name: trivy / container image CVE scan
+    runs-on: ubuntu-latest
+    # Only scan the published image on push to main or on schedule (not on PRs from forks)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image for scanning
+        # Build the image locally so we can scan it without needing GHCR credentials
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: smartnode:scan-${{ github.sha }}
+
+      - name: Run Trivy vulnerability scanner on image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: smartnode:scan-${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          # Fail on HIGH or CRITICAL vulnerabilities
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+          # Scan OS packages and language-specific packages
+          vuln-type: 'os,library'
+          # Ignore unfixed vulnerabilities to reduce noise
+          ignore-unfixed: true
+
+      - name: Upload Trivy image scan SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+          category: 'trivy-image'
+
+      - name: Upload Trivy image scan results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-sarif
+          path: trivy-image-results.sarif
+          retention-days: 30
+
+  # ─── Trivy: Scan filesystem / repo for misconfigurations and secrets ────────
+  trivy-fs-scan:
+    name: trivy / filesystem & secrets scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner on filesystem
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+          # Scan for vulnerabilities, misconfigurations, and exposed secrets
+          scanners: 'vuln,misconfig,secret'
+          ignore-unfixed: true
+
+      - name: Upload Trivy filesystem scan SARIF to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: 'trivy-fs'
+
+      - name: Upload Trivy filesystem scan results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-sarif
+          path: trivy-fs-results.sarif
+          retention-days: 30
