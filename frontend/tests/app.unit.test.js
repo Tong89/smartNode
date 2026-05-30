@@ -330,6 +330,102 @@ describe('processRequests (filtering & sorting)', () => {
   });
 });
 
+// ── Cesium 增量更新辅助逻辑 ───────────────────────────────────────────────────
+//
+// updateScene 本身依赖 Cesium 全局对象（浏览器端），这里测试其纯逻辑部分：
+// 实体索引的 add/update/remove 决策算法，以及 linkKey 构造规则。
+
+/**
+ * 模拟 updateScene 中的节点差分逻辑：
+ * 给定当前索引 entityIndex 和本轮活跃节点 id 集合 liveNodeIds，
+ * 返回需要删除的 id 列表（已消失节点）。
+ */
+function getExpiredEntityIds(entityIndex, liveNodeIds) {
+  return Object.keys(entityIndex).filter((eid) => !liveNodeIds.has(eid));
+}
+
+/**
+ * 判断给定节点 id 是否应该新建（不在索引中）或仅更新位置。
+ */
+function needsCreate(entityIndex, eid) {
+  return !Object.prototype.hasOwnProperty.call(entityIndex, eid);
+}
+
+/**
+ * 构造链路 key，镜像 updateRequestLinks 中的 `${req.id}:sat-gs` 等格式。
+ */
+function buildLinkKey(reqId, segment) {
+  return `${reqId}:${segment}`;
+}
+
+describe('Cesium 增量更新 — 实体索引差分逻辑', () => {
+  it('对新出现的节点返回 needsCreate=true', () => {
+    const index = { 'sat-SAT1': {}, 'gs-GS1': {} };
+    expect(needsCreate(index, 'sat-SAT2')).toBe(true);
+  });
+
+  it('对已存在节点返回 needsCreate=false（仅更新位置）', () => {
+    const index = { 'sat-SAT1': {}, 'gs-GS1': {} };
+    expect(needsCreate(index, 'sat-SAT1')).toBe(false);
+  });
+
+  it('消失节点被 getExpiredEntityIds 正确识别', () => {
+    const index = { 'sat-SAT1': {}, 'sat-SAT2': {}, 'gs-GS1': {} };
+    const liveIds = new Set(['sat-SAT1', 'gs-GS1']); // SAT2 消失
+    const expired = getExpiredEntityIds(index, liveIds);
+    expect(expired).toHaveLength(1);
+    expect(expired).toContain('sat-SAT2');
+  });
+
+  it('全部节点存活时 getExpiredEntityIds 返回空数组', () => {
+    const index = { 'sat-SAT1': {}, 'gs-GS1': {} };
+    const liveIds = new Set(['sat-SAT1', 'gs-GS1']);
+    expect(getExpiredEntityIds(index, liveIds)).toHaveLength(0);
+  });
+
+  it('全部节点消失时 getExpiredEntityIds 返回全部 key', () => {
+    const index = { 'sat-SAT1': {}, 'gs-GS1': {}, 'geo-GEO1': {} };
+    const liveIds = new Set();
+    const expired = getExpiredEntityIds(index, liveIds);
+    expect(expired).toHaveLength(3);
+  });
+
+  it('索引为空时 getExpiredEntityIds 返回空数组', () => {
+    expect(getExpiredEntityIds({}, new Set(['sat-SAT1']))).toHaveLength(0);
+  });
+});
+
+describe('Cesium 增量更新 — 链路 key 构造', () => {
+  it('直连链路 key 格式正确', () => {
+    expect(buildLinkKey('req-001', 'sat-gs')).toBe('req-001:sat-gs');
+  });
+
+  it('单中继：卫星到中继 key', () => {
+    expect(buildLinkKey('req-002', 'sat-relay1')).toBe('req-002:sat-relay1');
+  });
+
+  it('单中继：中继到地面站 key', () => {
+    expect(buildLinkKey('req-002', 'relay1-gs')).toBe('req-002:relay1-gs');
+  });
+
+  it('双中继：所有段 key 包含正确前缀', () => {
+    const keys = ['sat-relay1', 'relay1-relay2', 'relay2-gs'].map((seg) =>
+      buildLinkKey('req-003', seg)
+    );
+    expect(keys).toEqual([
+      'req-003:sat-relay1',
+      'req-003:relay1-relay2',
+      'req-003:relay2-gs',
+    ]);
+  });
+
+  it('不同请求生成不同 key（避免复用冲突）', () => {
+    const k1 = buildLinkKey('req-001', 'sat-gs');
+    const k2 = buildLinkKey('req-002', 'sat-gs');
+    expect(k1).not.toBe(k2);
+  });
+});
+
 // ── formatLinkMode ────────────────────────────────────────────────────────────
 
 describe('formatLinkMode', () => {
