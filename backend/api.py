@@ -40,8 +40,11 @@ from backend.core import (
     OPPORTUNISTIC_STATIONS,
     TIME_SCALE,
     TOTAL_DATA_COMBINATIONS,
-    simulation_engine,
+    create_engine,
 )
+
+# 经工厂创建引擎并启动（导入 backend.core 本身不再起线程）
+simulation_engine = create_engine(autostart=True)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = PROJECT_ROOT / 'frontend'
