@@ -51,6 +51,8 @@ const app = Vue.createApp({
       systemInfo: {},
       resourceStatus: {},
       resourceUtilization: {},
+      resourceTimeline: null,   // 资源时间轴数据（来自 /api/resource_timeline）
+      ganttHoveredEvent: null,  // 甘特图当前悬浮事件
       notice: '',
       noticeType: 'success',
       submitting: false,
@@ -180,6 +182,49 @@ const app = Vue.createApp({
         { key: 'overall', label: '综合占用', value: Number(summary.overall_utilization || 0) },
       ];
     },
+
+    // ── 甘特图计算属性 ────────────────────────────────────────────────
+    ganttTimeRange() {
+      if (!this.resourceTimeline) return [0, 1];
+      const [s, e] = this.resourceTimeline.time_range;
+      return e > s ? [s, e] : [s, s + 1];
+    },
+
+    ganttRangeSpan() {
+      return this.ganttTimeRange[1] - this.ganttTimeRange[0];
+    },
+
+    ganttTimeTicks() {
+      const [start] = this.ganttTimeRange;
+      const span = this.ganttRangeSpan;
+      const count = 5;
+      return Array.from({ length: count + 1 }, (_, i) => {
+        const t = start + (span * i) / count;
+        const pct = (i / count) * 100;
+        return { t, pct, label: this.formatTime(t) };
+      });
+    },
+
+    ganttGroups() {
+      if (!this.resourceTimeline) return [];
+      const result = [];
+      const satRows = Object.entries(this.resourceTimeline.satellites || {})
+        .filter(([, res]) => res.events.length > 0)
+        .map(([id, res]) => ({ id, name: res.name, events: res.events }));
+      if (satRows.length) result.push({ id: 'sat', label: '卫星 LEO', rows: satRows });
+
+      const gsRows = Object.entries(this.resourceTimeline.ground_stations || {})
+        .filter(([, res]) => res.events.length > 0)
+        .map(([id, res]) => ({ id, name: res.name, events: res.events }));
+      if (gsRows.length) result.push({ id: 'gs', label: '地面站', rows: gsRows });
+
+      const geoRows = Object.entries(this.resourceTimeline.geo_relays || {})
+        .filter(([, res]) => res.events.length > 0)
+        .map(([id, res]) => ({ id, name: res.name, events: res.events }));
+      if (geoRows.length) result.push({ id: 'geo', label: '中继 GEO', rows: geoRows });
+
+      return result;
+    },
   },
 
   mounted() {
@@ -289,12 +334,13 @@ const app = Vue.createApp({
       if (this.refreshing) return;
       this.refreshing = true;
       try {
-        const [health, data, info, status, utilization] = await Promise.allSettled([
+        const [health, data, info, status, utilization, timeline] = await Promise.allSettled([
           this.fetchJson('/api/health'),
           this.fetchJson('/api/data'),
           this.fetchJson('/api/system_info'),
           this.fetchJson('/api/resource_status'),
           this.fetchJson('/api/resource_utilization'),
+          this.fetchJson('/api/resource_timeline'),
         ]);
 
         this.backendOnline = health.status === 'fulfilled';
@@ -315,6 +361,10 @@ const app = Vue.createApp({
 
         if (utilization.status === 'fulfilled') {
           this.resourceUtilization = utilization.value || {};
+        }
+
+        if (timeline.status === 'fulfilled') {
+          this.resourceTimeline = timeline.value || null;
         }
       } catch (error) {
         this.backendOnline = false;
@@ -1179,6 +1229,49 @@ const app = Vue.createApp({
       if (req.transmission_method === 'relay') return '中继';
       if (req.transmission_method === 'multi_relay') return '多跳';
       return '-';
+    },
+
+    // ── 甘特图辅助方法 ────────────────────────────────────────────────
+    /**
+     * 将仿真时刻转换为时间轴上的百分比位置。
+     */
+    ganttToPct(t) {
+      const [start] = this.ganttTimeRange;
+      const span = this.ganttRangeSpan;
+      return Math.max(0, Math.min(100, ((t - start) / span) * 100));
+    },
+
+    ganttBarStyle(evt) {
+      const leftPct = this.ganttToPct(evt.start);
+      const rightPct = this.ganttToPct(evt.end);
+      const widthPct = Math.max(0.4, rightPct - leftPct);
+      return { left: leftPct + '%', width: widthPct + '%' };
+    },
+
+    ganttBarClass(evt) {
+      return `bar-${evt.status} bar-dt-${(evt.data_type || 'unknown').toLowerCase()}`;
+    },
+
+    ganttBarTooltip(evt) {
+      const dtLabel = DATA_TYPE_LABELS[evt.data_type] || evt.data_type;
+      const stLabels = { transmitting: '传输中', completed: '已完成' };
+      const stLabel = stLabels[evt.status] || evt.status;
+      return `${evt.request_id} · ${dtLabel} · ${stLabel} · ${evt.data_size}MB`;
+    },
+
+    ganttHover(evt) {
+      this.ganttHoveredEvent = evt;
+    },
+
+    ganttLeave() {
+      this.ganttHoveredEvent = null;
+    },
+
+    formatDuration(seconds) {
+      const total = Math.max(0, Math.floor(Number(seconds || 0)));
+      if (total < 60) return `${total}s`;
+      if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`;
+      return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
     },
 
     formatProgress(progress) {
