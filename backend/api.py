@@ -745,6 +745,23 @@ def favicon():
     return '', 204
 
 
+# ==========================================
+# 接口版本化：为每个 /api/<x> 注册 /api/v1/<x> 别名（保留旧路径兼容）
+# ==========================================
+def _register_v1_aliases():
+    existing = list(app.url_map.iter_rules())
+    for rule in existing:
+        path = str(rule.rule)
+        if path.startswith('/api/') and not path.startswith('/api/v1/'):
+            view = app.view_functions[rule.endpoint]
+            methods = sorted(m for m in rule.methods if m in {'GET', 'POST', 'PUT', 'DELETE', 'PATCH'})
+            app.add_url_rule('/api/v1/' + path[len('/api/'):], endpoint='v1_' + rule.endpoint,
+                             view_func=view, methods=methods)
+
+
+_register_v1_aliases()
+
+
 def run(host='127.0.0.1', port=5000, debug=False):
     validate_config()  # 生产模式下缺失必填密钥即拒启
     simulation_engine.reset_requests()
