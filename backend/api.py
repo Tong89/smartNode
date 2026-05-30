@@ -8,7 +8,7 @@ from pathlib import Path
 from backend.__about__ import __version__
 from backend.logging_config import get_logger
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 from flask import g
 
@@ -69,6 +69,10 @@ init_auth(app)
 # 注册 Prometheus /metrics 端点与 OTel 链路追踪（prometheus_client 缺失时降级）
 from backend.metrics import init_metrics  # noqa: E402
 init_metrics(app, simulation_engine)
+
+# 启动 SSE 态势快照推送线程（每 2 秒向所有 SSE 订阅者推送全量快照）
+from backend.stream import start_snapshot_thread  # noqa: E402
+start_snapshot_thread(lambda: simulation_engine)
 
 
 # CORS 来源白名单（逗号分隔，环境变量配置）；默认仅本机回环
@@ -595,6 +599,35 @@ def get_resource_status():
         }
         
         return jsonify(result)
+
+
+@app.route('/api/v1/stream')
+def sse_stream_endpoint():
+    """
+    SSE 实时推送端点（GET /api/v1/stream）。
+
+    以 ``text/event-stream`` 格式持续推送两类 SSE 事件：
+    * ``snapshot`` – 每 2 秒推送一次完整态势快照（卫星位置、资源、请求列表）
+    * ``event``    – 实时推送请求接受/拒绝/完成等调度事件
+
+    客户端示例::
+
+        const es = new EventSource('/api/v1/stream');
+        es.addEventListener('snapshot', e => { const snap = JSON.parse(e.data); … });
+        es.addEventListener('event',    e => { const evt  = JSON.parse(e.data); … });
+    """
+    from backend.stream import sse_stream  # local import to avoid circular at module level
+
+    def generate():
+        yield from sse_stream()
+
+    resp = Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+    )
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers['X-Accel-Buffering'] = 'no'  # disable nginx proxy buffering
+    return resp
 
 
 @app.route('/api/update_ground_stations', methods=['POST'])

@@ -514,7 +514,7 @@ class SimulationEngine:
 
     def _log(self, message, level="normal", request=None):
         """
-        统一日志输出方法 - 支持遥测级别控制
+        统一日志输出方法 - 支持遥测级别控制，并将调度事件发布到 SSE 总线。
 
         Args:
             message: 日志消息
@@ -539,6 +539,23 @@ class SimulationEngine:
                 extra["request_id"] = request.id
                 extra["satellite_id"] = getattr(request, "satellite_id", None)
             _core_logger.log(log_level, message, **extra)
+
+        # 将 high/normal 级别的调度事件发布到 SSE 总线供前端实时订阅
+        if level_priority.get(level, 2) >= level_priority.get("normal", 2):
+            try:
+                from backend.stream import event_bus  # lazy import to avoid circular dep
+                event_data = {
+                    "message": message,
+                    "level": level,
+                    "time": self.current_time,
+                }
+                if request is not None:
+                    event_data["request_id"] = request.id
+                    event_data["request_status"] = getattr(request, "status", None)
+                    event_data["satellite_id"] = getattr(request, "satellite_id", None)
+                event_bus.publish("event", event_data)
+            except Exception:  # noqa: BLE001
+                pass  # never let SSE errors break core simulation logic
     
     def reseed(self, seed):
         """重置随机源以进入确定性模式（影响后续地面站抽样/调度/背景任务/轨道生成）。"""
