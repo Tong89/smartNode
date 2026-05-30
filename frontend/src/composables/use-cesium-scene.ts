@@ -4,14 +4,19 @@
  * Returns:
  *   cesiumReady         — ref<boolean>  whether Cesium Viewer was initialised successfully
  *   showCoverage        — ref<boolean>  whether coverage footprint layer is visible
+ *   mapMode             — ref<'2D'|'3D'>  current map display mode
  *   initCesium          — call once (mounted) with a DOM element id
  *   updateScene         — call whenever satellite / gs / relay / request data changes
  *   resizeViewer        — call on window resize or layout change
  *   destroyViewer       — call in beforeUnmount
  *   toggleCoverageLayer — toggle coverage footprint visibility
+ *   toggleMapMode       — switch between 2D and 3D display modes
  */
 
 import { ref } from 'vue';
+
+/** localStorage key for persisting map mode across sessions */
+const MAP_MODE_STORAGE_KEY = 'smartnode_map_mode';
 import type { Satellite, GroundStation, GeoRelay, TransmissionRequest } from '../types/api';
 
 declare const window: Window & {
@@ -54,6 +59,15 @@ export function useCesiumScene() {
   const cesiumReady = ref(false);
   /** Whether the coverage footprint layer (LEO circles + GEO rings) is visible */
   const showCoverage = ref(true);
+
+  /**
+   * Current map display mode: '3D' (default) or '2D' (flat map).
+   * Persisted to localStorage so the user's last choice is remembered.
+   */
+  const storedMode = typeof localStorage !== 'undefined'
+    ? (localStorage.getItem(MAP_MODE_STORAGE_KEY) as '2D' | '3D' | null)
+    : null;
+  const mapMode = ref<'2D' | '3D'>(storedMode === '2D' ? '2D' : '3D');
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let viewer: any = null;
@@ -103,10 +117,47 @@ export function useCesiumScene() {
       });
 
       cesiumReady.value = true;
+
+      // Apply the persisted map mode immediately after init
+      if (mapMode.value === '2D') {
+        // Use morphToColumbusView for a flat map (morphTo2D renders a rectangle around
+        // the globe which is less useful; Columbus is the true flat "2D" projection).
+        viewer.scene.morphTo2D(0);
+      }
     } catch (error) {
       console.warn('Cesium 初始化失败:', error);
       cesiumReady.value = false;
     }
+  }
+
+  /**
+   * Toggle between 2D (flat / Columbus-view) and 3D (globe) modes.
+   * The transition is animated with a 1-second morph.
+   * The selected mode is persisted to localStorage.
+   */
+  function toggleMapMode(): void {
+    const Cesium = getCesium();
+    if (!Cesium || !viewer || !cesiumReady.value) return;
+
+    if (mapMode.value === '3D') {
+      // Switch to 2D flat map
+      viewer.scene.morphTo2D(1.0);
+      mapMode.value = '2D';
+    } else {
+      // Switch back to 3D globe
+      viewer.scene.morphTo3D(1.0);
+      mapMode.value = '3D';
+    }
+
+    // Persist choice so it survives page reloads
+    try {
+      localStorage.setItem(MAP_MODE_STORAGE_KEY, mapMode.value);
+    } catch (_) {
+      // localStorage may be unavailable in some environments; ignore silently
+    }
+
+    // Ensure the scene re-renders after morph
+    viewer.scene.requestRender();
   }
 
   function toCartesian(lon: number, lat: number, alt = 0) {
@@ -418,10 +469,12 @@ export function useCesiumScene() {
   return {
     cesiumReady,
     showCoverage,
+    mapMode,
     initCesium,
     updateScene,
     resizeViewer,
     destroyViewer,
     toggleCoverageLayer,
+    toggleMapMode,
   };
 }
