@@ -18,6 +18,7 @@ from backend.auth import (
 )
 from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH, debug_api_enabled, validate_config
 from backend.envelope import ok
+from backend.openapi import OPENAPI_SPEC, SWAGGER_HTML
 from backend.errors import error_response, register_error_handlers
 from backend.rbac import require_role
 from backend.ratelimit import rate_limit
@@ -743,6 +744,18 @@ def health_check():
 def favicon():
     """返回空favicon避免404错误"""
     return '', 204
+
+
+@app.route('/api/openapi.json')
+def openapi_spec():
+    """OpenAPI 3.1 规范（机器可读）。"""
+    return jsonify(OPENAPI_SPEC)
+
+
+@app.route('/docs')
+def swagger_docs():
+    """Swagger UI 文档站。"""
+    return SWAGGER_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
 # ==========================================
