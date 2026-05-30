@@ -13,11 +13,29 @@
       :total-requests="totalRequests"
     />
 
+    <!-- Coverage layer toggle button -->
+    <div class="map-layer-controls">
+      <button
+        class="layer-toggle-btn"
+        :class="{ 'layer-toggle-btn--active': showCoverage }"
+        :title="showCoverage ? '隐藏覆盖图层' : '显示覆盖图层'"
+        @click="toggleCoverageLayer"
+      >
+        <span class="layer-toggle-icon">
+          <span class="legend-dot sat-cov"></span>
+          <span class="legend-dot geo-cov"></span>
+        </span>
+        覆盖足迹
+      </button>
+    </div>
+
     <div class="map-legend">
       <span><b class="legend-dot sat"></b> LEO/MEO</span>
       <span><b class="legend-dot gs"></b> 地面站</span>
       <span><b class="legend-dot geo"></b> GEO 中继</span>
       <span><b class="legend-line"></b> 活动链路</span>
+      <span v-if="showCoverage"><b class="legend-ellipse sat-cov-legend"></b> LEO 覆盖</span>
+      <span v-if="showCoverage"><b class="legend-ellipse geo-cov-legend"></b> GEO 可见</span>
     </div>
   </section>
 </template>
@@ -70,7 +88,15 @@ export default defineComponent({
   },
 
   setup(props) {
-    const { cesiumReady, initCesium, updateScene, resizeViewer, destroyViewer } = useCesiumScene();
+    const {
+      cesiumReady,
+      showCoverage,
+      initCesium,
+      updateScene,
+      resizeViewer,
+      destroyViewer,
+      toggleCoverageLayer,
+    } = useCesiumScene();
 
     onMounted(() => {
       initCesium('cesiumContainer');
@@ -96,7 +122,7 @@ export default defineComponent({
       { deep: true },
     );
 
-    return { cesiumReady, resizeViewer };
+    return { cesiumReady, showCoverage, resizeViewer, toggleCoverageLayer };
   },
 });
 </script>
