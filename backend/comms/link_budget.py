@@ -9,6 +9,7 @@
 - **SNR**：信噪比
 - **BER**：对 QPSK / 8PSK / 16APSK 给出误码率估算
 - **可达速率**：香农容量与调制约束下的可达 Mbps
+- **大气衰减**：雨衰（ITU-R P.838）与气体吸收（ITU-R P.676）叠加损耗
 
 天线参数默认值基于中国天链二号 Ka 频段与典型 X 频段参数。
 """
@@ -406,6 +407,9 @@ def link_budget_direct(
     distance_km: float,
     antenna_type: str = "Ka",
     data_type: Optional[str] = None,
+    elevation_deg: float = 45.0,
+    rainfall_rate_mm_h: float = 0.0,
+    gs_altitude_km: float = 0.0,
 ) -> LinkBudgetResult:
     """LEO 卫星→地面站直连链路预算。
 
@@ -417,13 +421,33 @@ def link_budget_direct(
         地面站天线频段（"Ka" / "X" 等）。
     data_type : str, optional
         数据类型（"RAW_IMAGE" 时对速率做 0.6 折调整）。
+    elevation_deg : float
+        卫星仰角（度），用于大气衰减计算，默认 45°。
+    rainfall_rate_mm_h : float
+        地面降雨率（mm/h），0 表示晴天无雨衰，默认 0。
+    gs_altitude_km : float
+        地面站海拔（km），用于雨衰路径折算，默认 0。
 
     Returns
     -------
     LinkBudgetResult
     """
+    from backend.comms.atmosphere import atmospheric_loss_for_link
+
     band = antenna_type if antenna_type in FREQUENCY_TABLE else "Ka"
+    freq_hz = FREQUENCY_TABLE[band]
+
+    # 计算大气衰减（雨衰 + 气体吸收），作为附加 misc_loss 叠加
+    atm_loss_db = atmospheric_loss_for_link(
+        freq_hz=freq_hz,
+        elevation_deg=max(elevation_deg, 0.1),
+        rainfall_rate_mm_h=rainfall_rate_mm_h,
+        gs_altitude_km=gs_altitude_km,
+    )
+
     lb = LinkBudget(band=band)
+    # 将大气衰减叠加到杂散损耗之上
+    lb.misc_loss_db = (lb.misc_loss_db or 0.0) + atm_loss_db  # type: ignore[operator]
     result = lb.compute(distance_km)
 
     if data_type == "RAW_IMAGE":
@@ -438,6 +462,9 @@ def link_budget_relay(
     dist_leo_geo_km: float,
     dist_geo_gs_km: float,
     data_type: Optional[str] = None,
+    elevation_deg_gs: float = 45.0,
+    rainfall_rate_mm_h: float = 0.0,
+    gs_altitude_km: float = 0.0,
 ) -> LinkBudgetResult:
     """LEO→GEO→地面站中继链路预算（返回瓶颈链路结果）。
 
@@ -449,25 +476,51 @@ def link_budget_relay(
         GEO 到地面站斜距 (km)。
     data_type : str, optional
         数据类型。
+    elevation_deg_gs : float
+        地面站观测 GEO 的仰角（度），用于下行链路大气衰减，默认 45°。
+    rainfall_rate_mm_h : float
+        地面降雨率（mm/h），影响地面站侧链路，默认 0。
+    gs_altitude_km : float
+        地面站海拔（km），默认 0。
 
     Returns
     -------
     LinkBudgetResult
         瓶颈链路（可达速率最低）的链路预算结果。
     """
-    # LEO→GEO 上行（Ka 频段）
+    from backend.comms.atmosphere import atmospheric_loss_for_link
+
+    freq_ka_hz = FREQUENCY_TABLE["Ka"]
+
+    # LEO→GEO 上行（Ka 频段）：大气衰减按 LEO 仰角近似（LEO 距地面 ~500 km，与 GEO 近乎天顶角）
+    # 上行链路大气衰减影响小（星间链路不穿雨层），使用气体��收（零雨衰）
+    atm_loss_up_db = atmospheric_loss_for_link(
+        freq_hz=freq_ka_hz,
+        elevation_deg=70.0,   # LEO→GEO：高仰角，路径穿越大气层短
+        rainfall_rate_mm_h=0.0,
+    )
     lb_up = LinkBudget(
         band="Ka",
-        eirp_dbw=EIRP_DEFAULTS["Ka"] + 3,   # 卫星对 GEO 略高功率
-        g_t_db_k=G_T_DEFAULTS["Ka"] + 5,    # GEO 天线增益较高
+        eirp_dbw=EIRP_DEFAULTS["Ka"] + 3,
+        g_t_db_k=G_T_DEFAULTS["Ka"] + 5,
+        misc_loss_db=MISC_LOSSES_DB.get("Ka", 2.5) + atm_loss_up_db,
     )
     res_up = lb_up.compute(dist_leo_geo_km)
 
-    # GEO→地面站下行（Ka 频段）
-    lb_dn = LinkBudget(band="Ka")
+    # GEO→地面站下行（Ka 频段）：叠加地面站仰角与降雨率对应的大气衰减
+    atm_loss_dn_db = atmospheric_loss_for_link(
+        freq_hz=freq_ka_hz,
+        elevation_deg=max(elevation_deg_gs, 0.1),
+        rainfall_rate_mm_h=rainfall_rate_mm_h,
+        gs_altitude_km=gs_altitude_km,
+    )
+    lb_dn = LinkBudget(
+        band="Ka",
+        misc_loss_db=MISC_LOSSES_DB.get("Ka", 2.5) + atm_loss_dn_db,
+    )
     res_dn = lb_dn.compute(dist_geo_gs_km)
 
-    # 瓶颈取速率最小者
+    # 瓶颈取速率最��者
     bottleneck = res_up if res_up.achievable_rate_mbps < res_dn.achievable_rate_mbps else res_dn
     if data_type == "RAW_IMAGE":
         bottleneck.achievable_rate_mbps *= 0.6
