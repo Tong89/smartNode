@@ -13,6 +13,8 @@ import logging
 from datetime import datetime, timedelta
 
 from backend.config import (
+    AGING_FACTOR,
+    AGING_MAX,
     HANDOVER_RATE_RATIO,
     RESOURCE_TIGHT_THRESHOLD as CFG_RESOURCE_TIGHT_THRESHOLD,
 )
@@ -1329,9 +1331,24 @@ class SimulationEngine:
             return size * 1024
         return size
 
+    def _effective_priority(self, req):
+        """有效优先级 = 基础优先级 + 老化加权（随等待时间单调上升，封顶 AGING_MAX）。
+
+        使长期得不到链路的低优先级请求随等待自动升权，避免饥饿。
+        """
+        base = req.priority or 0
+        wait = max(0.0, self.current_time - (req.submit_time if req.submit_time is not None else self.current_time))
+        return base + min(AGING_MAX, AGING_FACTOR * wait)
+
     def _update_transmissions(self, delta_time):
         """更新所有传输任务的进度 (包含动态链路切换逻辑)"""
-        for req in self.transmission_requests[:]:
+        # 待分配(accepted)请求按有效优先级降序处理，使高优先级/长等待者先抢链路；
+        # 其余(传输中等)保持原顺序。迭代独立列表，循环体内可安全增删 transmission_requests。
+        pending = [r for r in self.transmission_requests if r.status == "accepted"]
+        pending.sort(key=self._effective_priority, reverse=True)
+        others = [r for r in self.transmission_requests if r.status != "accepted"]
+
+        for req in pending + others:
             # ==================================================
             # 1. 处理等待中的请求 (尝试开始传输)
             # ==================================================

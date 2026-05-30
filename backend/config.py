@@ -13,6 +13,10 @@ SATELLITE_MAX_BANDWIDTH = 600
 GS_MAX_BANDWIDTH = 1000
 DEFAULT_RELAY_BANDWIDTH = 2000
 
+# 调度老化（饥饿规避）：有效优先级 = 基础优先级 + min(AGING_MAX, AGING_FACTOR * 等待秒数)
+AGING_FACTOR = 0.02
+AGING_MAX = 8.0
+
 # 调度与切换阈值
 RESOURCE_TIGHT_THRESHOLD = 0.95   # 平均利用率超过此值视为资源紧张
 HANDOVER_RATE_RATIO = 1.2         # 链路切换：新速率需高于当前速率的倍数
