@@ -12,7 +12,8 @@
   "dependencies": {
     "vue": "^3.4.0",
     "pinia": "^2.1.0",
-    "cesium": "^1.119.0"
+    "cesium": "^1.119.0",
+    "lucide": "^0.453.0"
   },
   "devDependencies": {
     "vite": "^5.4.0",
