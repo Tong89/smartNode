@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """Flask API and static frontend routes for SmartNode."""
 
+import logging
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
+
+from backend.errors import error_response, register_error_handlers
 
 from backend.core import (
     DATA_COMBINATIONS,
@@ -23,8 +26,13 @@ from backend.core import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = PROJECT_ROOT / 'frontend'
 
+logger = logging.getLogger("smartnode")
+
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
+
+# 注册统一脱敏错误处理器（4xx/5xx 返回稳定错误码，不回传 traceback）
+register_error_handlers(app)
 
 
 @app.after_request
@@ -70,11 +78,10 @@ def submit_transmission_request():
         if isinstance(result, dict) and result.get("status") == "error":
             return jsonify(result), 400
         return jsonify(result)
-    except Exception as e:
-        import traceback
-        error_msg = f"提交请求失败: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)
-        return jsonify({"error": error_msg, "status": "error"}), 500
+    except Exception:
+        # 真实异常仅记录到服务端日志，响应体脱敏（不回传 traceback/路径/栈信息）
+        logger.exception("提交请求失败")
+        return error_response("INTERNAL_ERROR")
 
 
 @app.route('/api/requests')
@@ -447,8 +454,9 @@ def update_ground_stations():
                 "success": False,
                 "message": "地面站数量未改变"
             })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("接口处理失败")
+        return error_response("INTERNAL_ERROR")
 
 @app.route('/api/update_leo_satellites', methods=['POST'])
 def update_leo_satellites():
@@ -492,8 +500,9 @@ def update_leo_satellites():
                 "success": False,
                 "message": "LEO卫星数量未改变"
             })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("接口处理失败")
+        return error_response("INTERNAL_ERROR")
 
 
 @app.route('/api/opportunistic_stations', methods=['GET'])
@@ -548,8 +557,9 @@ def get_opportunistic_stations():
             "count": len(stations_info),
             "stations": stations_info
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("接口处理失败")
+        return error_response("INTERNAL_ERROR")
 
 
 @app.route('/api/data_combinations', methods=['GET'])
@@ -565,8 +575,9 @@ def get_data_combinations():
             "security_levels": DATA_SECURITY_LEVELS,
             "sample_combinations": DATA_COMBINATIONS[:10]  # 返回前10个示例
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        logger.exception("接口处理失败")
+        return error_response("INTERNAL_ERROR")
 
 
 
