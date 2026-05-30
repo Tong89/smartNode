@@ -3,13 +3,28 @@
 
 将散落在 core.py / api.py 的速率基准、带宽上限、调度阈值等以具名常量收敛于此，
 便于统一调参与测试。数值与抽取前保持一致。
+
+环境变量（全部以 SMARTNODE_ 为前缀）：
+    SMARTNODE_HOST               : 监听地址，默认 127.0.0.1
+    SMARTNODE_PORT               : 监听端口，默认 5000
+    SMARTNODE_ENV                : 运行环境 development / production，默认 development
+    SMARTNODE_TIME_SCALE         : 仿真时间倍率（正整数），默认 10
+    SMARTNODE_LOG_LEVEL          : 日志级别 DEBUG/INFO/WARNING/ERROR，默认 INFO
+    SMARTNODE_JWT_SECRET         : JWT 签名密钥（生产必填）
+    SMARTNODE_API_KEY            : API 鉴权密钥（生产必填）
+    SMARTNODE_CORS_ORIGINS       : 允许的 CORS 来源（逗号分隔），默认本机回环
+    SMARTNODE_DEBUG_API          : 是否开启调试接口 0/1，默认 0
+    SMARTNODE_SEED               : 随机种子，不填则非确定性
 """
 
 import json
+import logging
 import os
 
-# 仿真时钟
-TIME_SCALE = 10  # 仿真加速倍率
+# 仿真时钟（默认值；运行时通过 get_time_scale() 读取环境变量覆盖）
+_DEFAULT_TIME_SCALE = 10
+
+TIME_SCALE = _DEFAULT_TIME_SCALE  # 保持向后兼容的模块级常量，优先使用 get_time_scale()
 
 
 def debug_api_enabled():
@@ -59,6 +74,37 @@ def get_bind_port():
         return 5000
 
 
+def get_time_scale() -> int:
+    """从环境变量 SMARTNODE_TIME_SCALE 读取仿真时间倍率。
+
+    未设置或值无效时回退到默认值 10（与历史行为一致）。
+    建议范围：1（实时）~ 600（极速仿真）。
+    """
+    raw = os.environ.get("SMARTNODE_TIME_SCALE", "").strip()
+    if raw:
+        try:
+            val = int(raw)
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+    return _DEFAULT_TIME_SCALE
+
+
+def get_log_level() -> int:
+    """从环境变量 SMARTNODE_LOG_LEVEL 或 LOG_LEVEL 解析日志级别。
+
+    SMARTNODE_LOG_LEVEL 优先级高于 LOG_LEVEL（兼容旧约定）。
+    默认返回 logging.INFO。
+    """
+    raw = (
+        os.environ.get("SMARTNODE_LOG_LEVEL")
+        or os.environ.get("LOG_LEVEL")
+        or "INFO"
+    ).upper().strip()
+    return getattr(logging, raw, logging.INFO)
+
+
 class LayeredSettings:
     """分层配置：默认 < 文件(JSON) < 环境变量 < 运行时覆盖。
 
@@ -69,7 +115,8 @@ class LayeredSettings:
         "env": "development",
         "host": "127.0.0.1",
         "port": 5000,
-        "time_scale": TIME_SCALE,
+        "time_scale": _DEFAULT_TIME_SCALE,
+        "log_level": "INFO",
         "cors_origins": "http://localhost:5000,http://127.0.0.1:5000",
         "debug_api": False,
         "background_task_enabled": False,

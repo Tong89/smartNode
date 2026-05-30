@@ -41,8 +41,16 @@ TELEMETRY_LEVEL_MAP: dict[str, int] = {
 # ---------------------------------------------------------------------------
 
 def _resolve_log_level() -> int:
-    """从环境变量 LOG_LEVEL 解析日志级别，默认 INFO。"""
-    raw = os.environ.get("LOG_LEVEL", "INFO").upper()
+    """从环境变量解析日志级别，默认 INFO。
+
+    优先级：SMARTNODE_LOG_LEVEL > LOG_LEVEL > 默认 INFO。
+    统一使用带 SMARTNODE_ 前缀的变量；LOG_LEVEL 作为向后兼容回退。
+    """
+    raw = (
+        os.environ.get("SMARTNODE_LOG_LEVEL")
+        or os.environ.get("LOG_LEVEL")
+        or "INFO"
+    ).upper()
     return getattr(logging, raw, logging.INFO)
 
 
