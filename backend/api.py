@@ -1332,6 +1332,82 @@ def snapshot_import():
 
 
 # ==========================================
+# 7b. 轨道轨迹采样端点
+# ==========================================
+
+@app.route('/api/orbit_tracks')
+def get_orbit_tracks():
+    """返回所有 LEO/MEO 卫星在当前时刻起的一个轨道周期内的位置采样点。
+
+    用于前端在 Cesium 中绘制空间轨道折线与地面星下点轨迹。
+
+    查询参数：
+      - steps (int): 每颗卫星的采样点数量，范围 [20, 360]，默认 90。
+
+    返回格式：
+      {
+        "time": <仿真时刻>,
+        "tracks": [
+          {
+            "id": "LEO-001",
+            "type": "LEO",
+            "orbit_period": 5760.0,
+            "orbit_points": [{"lat": ..., "lon": ..., "alt": ...}, ...],
+            "ground_points": [{"lat": ..., "lon": ..., "alt": 0}, ...]
+          },
+          ...
+        ]
+      }
+    """
+    try:
+        raw_steps = request.args.get('steps', '90')
+        try:
+            steps = int(raw_steps)
+        except (ValueError, TypeError):
+            steps = 90
+        steps = max(20, min(360, steps))
+
+        with simulation_engine.lock:
+            current_time = simulation_engine.current_time
+            leo_sats = list(simulation_engine.leo_satellites)
+            meo_sats = list(simulation_engine.meo_satellites)
+
+        tracks = []
+        all_sats = [(sat, 'LEO') for sat in leo_sats] + [(sat, 'MEO') for sat in meo_sats]
+
+        for sat, sat_type in all_sats:
+            period = sat.get_orbital_period()
+            dt = period / steps
+
+            orbit_points = []
+            ground_points = []
+            for i in range(steps):
+                t = current_time + i * dt
+                lat, lon, alt = sat.propagate(t)
+                orbit_points.append({'lat': round(lat, 4), 'lon': round(lon, 4), 'alt': round(alt, 0)})
+                ground_points.append({'lat': round(lat, 4), 'lon': round(lon, 4), 'alt': 0})
+
+            # 闭合轨道：加入起始点
+            if orbit_points:
+                orbit_points.append(orbit_points[0])
+                ground_points.append(ground_points[0])
+
+            tracks.append({
+                'id': sat.sat_id,
+                'name': sat.name,
+                'type': sat_type,
+                'orbit_period': round(period, 1),
+                'orbit_points': orbit_points,
+                'ground_points': ground_points,
+            })
+
+        return ok({'time': current_time, 'tracks': tracks})
+    except Exception:
+        logger.exception("轨道轨迹计算失败")
+        return error_response("INTERNAL_ERROR")
+
+
+# ==========================================
 # 8. Static frontend and open metadata routes
 # ==========================================
 
