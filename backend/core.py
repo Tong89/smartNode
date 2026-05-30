@@ -12,6 +12,12 @@ import sys
 import logging
 from datetime import datetime, timedelta
 
+from backend.logging_config import configure_logging, get_logger, telemetry_level_to_log_level
+
+# 初始化结构化日志（仅执行一次；api.py 导入 core 时会触发）
+configure_logging()
+_core_logger = get_logger("smartnode.core")
+
 from backend.config import (
     AGING_FACTOR,
     AGING_MAX,
@@ -478,34 +484,30 @@ class SimulationEngine:
     def _log(self, message, level="normal", request=None):
         """
         统一日志输出方法 - 支持遥测级别控制
-        
+
         Args:
             message: 日志消息
-            level: 日志级别 ("high", "normal", "low")
-            request: 关联的请求对象（可选）
+            level: 遥测级别 ("high", "normal", "low")，映射到结构化日志级别
+            request: 关联的请求对象（可选），其 telemetry_level 用于过滤
         """
         # 如果有关联请求，使用请求的遥测级别
         if request:
             telemetry_level = request.telemetry_level
         else:
             telemetry_level = "normal"
-        
+
         # 日志级别映射：high > normal > low
         level_priority = {"high": 3, "normal": 2, "low": 1}
         telemetry_priority = {"high": 3, "normal": 2, "low": 1}
-        
+
         # 只输出优先级 <= 遥测级别的日志
         if level_priority.get(level, 2) <= telemetry_priority.get(telemetry_level, 2):
-            # 添加时间戳和级别标记
-            timestamp = time.strftime("%H:%M:%S", time.localtime())
-            level_tag = {
-                "high": "[HIGH]",
-                "normal": "[INFO]",
-                "low": "[DEBUG]"
-            }.get(level, "[INFO]")
-            
-            req_tag = f"[REQ:{request.id}]" if request else ""
-            print(f"{timestamp} {level_tag}{req_tag} {message}")
+            log_level = telemetry_level_to_log_level(level)
+            extra: dict = {"telemetry_level": level}
+            if request is not None:
+                extra["request_id"] = request.id
+                extra["satellite_id"] = getattr(request, "satellite_id", None)
+            _core_logger.log(log_level, message, **extra)
     
     def reseed(self, seed):
         """重置随机源以进入确定性模式（影响后续地面站抽样/调度/背景任务/轨道生成）。"""
@@ -558,17 +560,25 @@ class SimulationEngine:
                 error_count += 1
                 import traceback
                 tb = traceback.format_exc()
-                print(f"[ERROR] 仿真循环异常 ({error_count}/{max_consecutive_errors}): {e}")
-                print(tb)
+                _core_logger.error(
+                    "仿真循环异常",
+                    error=str(e),
+                    error_count=error_count,
+                    max_consecutive_errors=max_consecutive_errors,
+                    traceback=tb,
+                )
                 # ⭐ 可观测：保留最近的循环异常（供调试接口查询），不静默吞掉
                 recent = getattr(self, "_loop_errors", [])
                 recent.append({"time": time.time(), "error": str(e), "traceback": tb})
                 self._loop_errors = recent[-20:]
 
                 if error_count >= max_consecutive_errors:
-                    print(f"[FATAL] 连续错误超过{max_consecutive_errors}次，仿真循环终止")
+                    _core_logger.critical(
+                        "连续错误超过阈值，仿真循环终止",
+                        max_consecutive_errors=max_consecutive_errors,
+                    )
                     break
-                
+
                 time.sleep(0.1)  # 出错后短暂等待
     
     def _generate_background_tasks(self):
@@ -1172,7 +1182,12 @@ class SimulationEngine:
                     self._start_transmission(req, satellite)
                 except Exception as e:
                     import traceback
-                    print(f"⚠️ _start_transmission 异常: {str(e)}\n{traceback.format_exc()}")
+                    _core_logger.error(
+                        "_start_transmission 异常",
+                        error=str(e),
+                        traceback=traceback.format_exc(),
+                        request_id=getattr(req, "id", None),
+                    )
                     # 不崩溃，让请求保持 accepted 状态等待后续处理
             else:
                 req.status = "rejected"
