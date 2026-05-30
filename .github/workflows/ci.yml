@@ -49,3 +49,85 @@ jobs:
           name: coverage-${{ matrix.python-version }}
           path: coverage.xml
           retention-days: 14
+
+  frontend-unit:
+    name: vitest unit tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefer-offline
+
+      - name: Run Vitest unit tests (src/ + tests/)
+        run: npm run test
+
+      - name: Upload Vitest coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 14
+
+  perf-benchmarks:
+    name: pytest-benchmark regression watchdog
+    runs-on: ubuntu-latest
+    # Run only on Python 3.11 to keep CI fast; matrix already covers correctness
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore benchmark baseline
+        uses: actions/cache@v4
+        with:
+          path: .benchmarks/
+          # Cache key: branch + commit so each PR gets a fresh start;
+          # restore from the most recent baseline on the same branch or main.
+          key: benchmarks-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            benchmarks-${{ github.ref_name }}-
+            benchmarks-main-
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime + dev dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run performance benchmarks and save baseline
+        # --benchmark-autosave writes results to .benchmarks/<machine>/<datetime>_*.json
+        # --benchmark-compare-fail=mean:20% fails CI if any benchmark mean regresses > 20%
+        # On the first run (no prior baseline) --benchmark-compare is a no-op.
+        run: |
+          pytest tests/test_perf_benchmarks.py \
+            --benchmark-autosave \
+            --benchmark-compare \
+            --benchmark-compare-fail=mean:20% \
+            --benchmark-storage=.benchmarks/ \
+            --benchmark-min-rounds=3 \
+            -v
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: .benchmarks/
+          retention-days: 30
