@@ -17,6 +17,7 @@ from backend.auth import (
     init_auth,
 )
 from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH
+from backend.envelope import ok
 from backend.errors import error_response, register_error_handlers
 from backend.rbac import require_role
 from backend.ratelimit import rate_limit
@@ -170,7 +171,7 @@ def get_all_requests_with_background():
 @app.route('/api/system_info')
 def get_system_info():
     """获取系统信息"""
-    return jsonify({
+    return ok({
         "time_scale": TIME_SCALE,
         "ground_station_count": len(simulation_engine.ground_stations),
         "total_ground_stations": len(simulation_engine.all_ground_stations),
@@ -710,7 +711,7 @@ def get_user_info():
     role = ident.get('role', 'operator')
     sub = ident.get('sub') or ('open-operator' if ident.get('auth') == 'open' else role)
     perms = _ROLE_PERMISSIONS.get(role, _ROLE_PERMISSIONS['viewer'])
-    return jsonify({
+    return ok({
         'username': sub,
         'role': role,
         'display_name': sub,
