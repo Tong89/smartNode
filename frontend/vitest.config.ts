@@ -1,13 +1,16 @@
 import { defineConfig } from 'vitest/config';
+import vue from '@vitejs/plugin-vue';
 
 /**
  * Vitest configuration for smartNode frontend unit tests.
  *
  * - Uses jsdom environment to emulate browser APIs (window, localStorage, etc.)
+ * - @vitejs/plugin-vue enables SFC (.vue) compilation in the test runner
  * - Coverage collected via v8 provider, reported as text + lcov
  * - Test files must match *.test.ts pattern
  */
 export default defineConfig({
+  plugins: [vue()],
   test: {
     environment: 'jsdom',
     globals: false,
