@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
@@ -21,6 +22,7 @@
     "@vitejs/plugin-vue": "^5.1.0",
     "vite-plugin-cesium": "^1.2.22",
     "vitest": "^2.1.0",
+    "@vitest/coverage-v8": "^2.1.0",
     "@vue/test-utils": "^2.4.0",
     "jsdom": "^25.0.0",
     "typescript": "^5.5.0",
