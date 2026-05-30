@@ -1902,6 +1902,67 @@ class SimulationEngine:
         """获取统计数据（用于资源利用率API）"""
         with self.lock:
             return self.stats.copy()
+
+    # ==========================================
+    # 快照（Snapshot）支持
+    # ==========================================
+
+    def snapshot(self, label: str = "") -> dict:
+        """拍摄仿真快照，返回快照字典。
+
+        快照包含当前时间、全部请求、资源占用、统计数据等。
+        主仿真循环继续运行，不受影响。
+
+        Parameters
+        ----------
+        label:
+            可选的快照标签（便于人类识别）。
+
+        Returns
+        -------
+        dict
+            符合 Snapshot Schema 的字典，可直接序列化为 JSON。
+        """
+        from backend.snapshot import SnapshotManager
+        return SnapshotManager.take(self, label=label)
+
+    def restore(self, snapshot_data: dict) -> dict:
+        """从快照字典恢复仿真状态，进入回放模式（主循环暂停）。
+
+        Parameters
+        ----------
+        snapshot_data:
+            由 :meth:`snapshot` 生成的快照字典。
+
+        Returns
+        -------
+        dict
+            恢复结果摘要。
+
+        Raises
+        ------
+        ValueError
+            快照结构非法或版本不兼容时抛出。
+        """
+        from backend.snapshot import SnapshotManager
+        return SnapshotManager.restore(self, snapshot_data)
+
+    def resume_from_snapshot(self) -> bool:
+        """退出回放模式，重新启动主仿真循环。
+
+        Returns
+        -------
+        bool
+            True 表示成功重启，False 表示引擎已在运行中。
+        """
+        with self.lock:
+            if self.running:
+                return False
+            self._replay_mode = False
+            self._replay_snapshot = None
+        self.start_simulation()
+        return True
+
 # ==========================================
 # 在 SimulationEngine 类中添加/修改以下方法
 # ==========================================
