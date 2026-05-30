@@ -2013,7 +2013,7 @@ class SimulationEngine:
             for gs in self.ground_stations:
                 # 检查地面站是否已被占用
                 gs_id = gs.get("id") if isinstance(gs, dict) else gs.station_id
-                if gs_id in self.resource_usage:
+                if gs_id in self.resource_usage["ground_stations"] and len(self.resource_usage["ground_stations"][gs_id]) > 0:
                     continue
                 
                 # ⭐ 实验要求：如果指定了首选地面站，只检查该站
@@ -2031,7 +2031,7 @@ class SimulationEngine:
             for geo in self.geo_relays:
                 # 检查GEO是否已被占用
                 geo_id = geo.get("id") if isinstance(geo, dict) else geo.geo_id
-                if geo_id in self.resource_usage:
+                if geo_id in self.resource_usage["geo_relays"] and len(self.resource_usage["geo_relays"][geo_id]) > 0:
                     continue
                 
                 # ⭐ 实验要求：如果指定了首选中继星，只检查该星
@@ -2048,7 +2048,7 @@ class SimulationEngine:
                 for gs in self.ground_stations:
                     # 检查地面站是否已被占用
                     gs_id = gs.get("id") if isinstance(gs, dict) else gs.station_id
-                    if gs_id in self.resource_usage:
+                    if gs_id in self.resource_usage["ground_stations"] and len(self.resource_usage["ground_stations"][gs_id]) > 0:
                         continue
                     
                     # ⭐ 实验要求：如果指定了首选地面站，只检查该站
@@ -2058,7 +2058,7 @@ class SimulationEngine:
                     if self.check_visibility(geo_pos, gs, min_elevation=5):
                         return True, None
                     gs_id = gs.get("id") if isinstance(gs, dict) else gs.station_id
-                    if gs_id in self.resource_usage:
+                    if gs_id in self.resource_usage["ground_stations"] and len(self.resource_usage["ground_stations"][gs_id]) > 0:
                         continue
                     if self.check_visibility(geo_pos, gs, min_elevation=5):
                         return True, None
