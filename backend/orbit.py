@@ -20,6 +20,7 @@ from backend.physics.propagator import (
     j2_arg_perigee_rate,
     j2_mean_anomaly_rate_correction,
 )
+from backend.physics.geometry import check_visibility_enu, check_geo_visibility_enu
 
 
 def calc_central_angle(lat1, lon1, lat2, lon2):
@@ -238,23 +239,22 @@ class OrbitalElements:
 
 
 def check_visibility(sat_pos, gs_pos, min_elevation=10):
-    """检查卫星与地面站的可见性（仰角 >= min_elevation）。"""
-    angle = calc_central_angle(sat_pos["lat"], sat_pos["lon"], gs_pos["lat"], gs_pos["lon"])
-    R = 6371.0
-    h = sat_pos["alt"] / 1000.0
-    d = R * math.radians(angle)
-    if d < 0.001:
-        elevation = 90.0
-    else:
-        slant_range = math.sqrt(R * R + (R + h) * (R + h) - 2 * R * (R + h) * math.cos(math.radians(angle)))
-        elevation = math.degrees(math.asin((R + h) * math.sin(math.radians(angle)) / slant_range)) - angle
-    return elevation >= min_elevation
+    """检查卫星与地面站的可见性（仰角 >= min_elevation）。
+
+    已更新为调用 ``backend.physics.geometry.check_visibility_enu``，
+    基于 WGS-84 ECEF 拓扑坐标精确求仰角，替代球面正弦/大圆角近似。
+    对外接口与原实现保持兼容。
+    """
+    return check_visibility_enu(sat_pos, gs_pos, min_elevation_deg=min_elevation)
 
 
 def check_geo_visibility(leo_pos, geo_pos):
-    """检查 LEO 与 GEO 中继星的可见性。"""
-    angle = calc_central_angle(leo_pos["lat"], leo_pos["lon"], geo_pos["lat"], geo_pos["lon"])
-    return angle < 80
+    """检查 LEO 与 GEO 中继星的可见性。
+
+    已更新为调用 ``backend.physics.geometry.check_geo_visibility_enu``，
+    基于精确仰角阈值判断，替代固定 80° 地心角近似。
+    """
+    return check_geo_visibility_enu(leo_pos, geo_pos)
 
 
 def calculate_direct_rate(sat_pos, gs, data_type=None):

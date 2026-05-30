@@ -29,6 +29,12 @@ from backend.config import (
     get_time_scale as _cfg_get_time_scale,
 )
 from backend.physics.coordinates import ecef_to_lla, eci_to_ecef, lla_to_ecef
+from backend.physics.geometry import (
+    check_visibility_enu,
+    check_geo_visibility_enu,
+    compute_look_angles,
+    compute_doppler_shift,
+)
 from backend import orbit
 from backend.orbit import OrbitalElements, calc_central_angle
 from backend.scheduling.handover import HandoverController
@@ -1042,10 +1048,62 @@ class SimulationEngine:
         return {"lat": 0, "lon": geo_relay["lon"], "alt": 35786000}
     
     def check_visibility(self, sat_pos, gs_pos, min_elevation=10):
-        return orbit.check_visibility(sat_pos, gs_pos, min_elevation)
-    
+        """卫星-地面站可见性：基于精确 ENU 拓扑仰角（替换大圆中心角近似）。"""
+        return check_visibility_enu(sat_pos, gs_pos, min_elevation_deg=min_elevation)
+
     def check_geo_visibility(self, leo_pos, geo_pos):
-        return orbit.check_geo_visibility(leo_pos, geo_pos)
+        """LEO-GEO 可见性：基于精确仰角阈值（替换固定 80° 中心角近似）。"""
+        return check_geo_visibility_enu(leo_pos, geo_pos)
+
+    def get_look_angles(self, sat_pos, gs_pos):
+        """获取卫星相对地面站的精确仰角/方位角/斜距。
+
+        参数
+        ----
+        sat_pos : dict  含 lat/lon/alt（alt 单位 m）的卫星位置。
+        gs_pos  : dict  含 lat/lon 的地面站，可选 alt（m），缺省 0。
+
+        返回
+        ----
+        dict  elevation_deg / azimuth_deg / slant_range_km
+        """
+        gs_alt = gs_pos.get("alt", 0.0)
+        return compute_look_angles(
+            sat_lat=sat_pos["lat"],
+            sat_lon=sat_pos["lon"],
+            sat_alt_m=sat_pos["alt"],
+            gs_lat=gs_pos["lat"],
+            gs_lon=gs_pos["lon"],
+            gs_alt_m=gs_alt,
+        )
+
+    def get_doppler_shift(self, sat_pos, sat_vel, gs_pos, carrier_freq_hz=20.2e9):
+        """计算卫星到地面站的多普勒频移。
+
+        参数
+        ----
+        sat_pos : dict  含 lat/lon/alt（m）的卫星位置。
+        sat_vel : dict  含 vx/vy/vz（km/s）的 ECEF 速度矢量。
+        gs_pos  : dict  含 lat/lon 的地面站，可选 alt（m）。
+        carrier_freq_hz : float  载波频率（Hz），默认 Ka 波段 20.2 GHz。
+
+        返回
+        ----
+        dict  doppler_hz / radial_vel_km_s / slant_range_km
+        """
+        gs_alt = gs_pos.get("alt", 0.0)
+        return compute_doppler_shift(
+            sat_lat=sat_pos["lat"],
+            sat_lon=sat_pos["lon"],
+            sat_alt_m=sat_pos["alt"],
+            sat_vx_km_s=sat_vel.get("vx", 0.0),
+            sat_vy_km_s=sat_vel.get("vy", 0.0),
+            sat_vz_km_s=sat_vel.get("vz", 0.0),
+            gs_lat=gs_pos["lat"],
+            gs_lon=gs_pos["lon"],
+            gs_alt_m=gs_alt,
+            carrier_freq_hz=carrier_freq_hz,
+        )
     
     def _resource_busy_by_other(self, resource_type, resource_id, req_id):
         return self.scheduler.resource_busy_by_other(resource_type, resource_id, req_id)
