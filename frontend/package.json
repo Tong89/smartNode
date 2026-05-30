@@ -1,0 +1,25 @@
+{
+  "name": "smartnode-frontend",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "pinia": "^2.1.0",
+    "cesium": "^1.119.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "@vitejs/plugin-vue": "^5.1.0",
+    "vite-plugin-cesium": "^1.2.22",
+    "vitest": "^2.1.0",
+    "@vue/test-utils": "^2.4.0",
+    "jsdom": "^25.0.0"
+  }
+}
