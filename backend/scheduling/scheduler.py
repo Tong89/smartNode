@@ -8,8 +8,12 @@ from backend.orbit import calc_central_angle
 
 
 class Scheduler:
-    def __init__(self, engine):
+    def __init__(self, engine, strategy=None):
         self.engine = engine
+        if strategy is None:
+            from backend.scheduling.strategy import GreedyMaxRateStrategy
+            strategy = GreedyMaxRateStrategy()
+        self.strategy = strategy
 
     def resource_busy_by_other(self, resource_type, resource_id, req_id):
         return any(
@@ -29,44 +33,7 @@ class Scheduler:
         return self.engine._check_relay_bandwidth_available(relay_id, required_rate)
 
     def find_best_available_link(self, req, satellite, sat_pos):
-        from backend.core import DATA_TYPES
-        eng = self.engine
-        data_config = DATA_TYPES.get(req.data_type, {})
-        allowed_links = data_config.get("allowed_links", ["direct"])
-        is_immediate_type = req.data_type in ["TASK_CMD", "INTEL"]
-        best_link = None
-        best_rate = 0
-
-        def can_use_satellite():
-            return is_immediate_type or not self.resource_busy_by_other("satellites", satellite.sat_id, req.id)
-
-        def can_use_ground_station(gs_id):
-            return is_immediate_type or not self.resource_busy_by_other("ground_stations", gs_id, req.id)
-
-        if "direct" in allowed_links and can_use_satellite():
-            for gs in self.ground_station_candidates(req):
-                if can_use_ground_station(gs["id"]) and eng.check_visibility(sat_pos, gs, min_elevation=10):
-                    rate = eng._calculate_direct_rate(sat_pos, gs, req.data_type)
-                    if rate > best_rate:
-                        best_rate = rate
-                        best_link = {"method": "direct", "ground_station": gs["id"], "relay": None, "relay2": None, "rate": rate}
-
-        if "relay" in allowed_links and can_use_satellite():
-            for geo in eng.geo_relays:
-                geo_pos = eng.get_geo_position(geo)
-                if not eng.check_geo_visibility(sat_pos, geo_pos):
-                    continue
-                for gs in self.ground_station_candidates(req):
-                    if not can_use_ground_station(gs["id"]):
-                        continue
-                    if not eng.check_visibility(geo_pos, gs, min_elevation=5):
-                        continue
-                    rate = eng._calculate_relay_rate(sat_pos, geo_pos, gs, req.data_type)
-                    if rate > best_rate and self.relay_can_carry_request(geo["id"], rate, req):
-                        best_rate = rate
-                        best_link = {"method": "relay", "ground_station": gs["id"], "relay": geo["id"], "relay2": None, "rate": rate}
-
-        return best_link
+        return self.strategy.select(self, req, satellite, sat_pos)
 
     def current_link_available(self, req, sat_pos):
         eng = self.engine
