@@ -13,8 +13,21 @@
       :total-requests="totalRequests"
     />
 
-    <!-- Coverage layer toggle button -->
+    <!-- Map layer controls (top-right overlay) -->
     <div class="map-layer-controls">
+      <!-- 2D / 3D mode toggle -->
+      <button
+        class="layer-toggle-btn map-mode-btn"
+        :class="{ 'layer-toggle-btn--active': mapMode === '2D' }"
+        :title="mapMode === '3D' ? '切换到 2D 平面地图' : '切换到 3D 地球模式'"
+        :aria-pressed="mapMode === '2D'"
+        @click="toggleMapMode"
+      >
+        <span class="map-mode-icon">{{ mapMode === '3D' ? '2D' : '3D' }}</span>
+        {{ mapMode === '3D' ? '平面地图' : '3D 地球' }}
+      </button>
+
+      <!-- Coverage layer toggle -->
       <button
         class="layer-toggle-btn"
         :class="{ 'layer-toggle-btn--active': showCoverage }"
@@ -36,6 +49,7 @@
       <span><b class="legend-line"></b> 活动链路</span>
       <span v-if="showCoverage"><b class="legend-ellipse sat-cov-legend"></b> LEO 覆盖</span>
       <span v-if="showCoverage"><b class="legend-ellipse geo-cov-legend"></b> GEO 可见</span>
+      <span class="map-mode-badge">{{ mapMode }}</span>
     </div>
   </section>
 </template>
@@ -91,11 +105,13 @@ export default defineComponent({
     const {
       cesiumReady,
       showCoverage,
+      mapMode,
       initCesium,
       updateScene,
       resizeViewer,
       destroyViewer,
       toggleCoverageLayer,
+      toggleMapMode,
     } = useCesiumScene();
 
     onMounted(() => {
@@ -122,7 +138,7 @@ export default defineComponent({
       { deep: true },
     );
 
-    return { cesiumReady, showCoverage, resizeViewer, toggleCoverageLayer };
+    return { cesiumReady, showCoverage, mapMode, resizeViewer, toggleCoverageLayer, toggleMapMode };
   },
 });
 </script>
