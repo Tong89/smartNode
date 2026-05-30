@@ -1,0 +1,16 @@
+[run]
+source = backend
+omit =
+    backend/__init__.py
+    backend/app.py
+
+[report]
+# Minimum coverage threshold; CI will fail below this value.
+# Raise this progressively as test coverage improves.
+fail_under = 60
+show_missing = true
+precision = 1
+skip_covered = false
+
+[xml]
+output = coverage.xml
