@@ -41,6 +41,17 @@ def get_bind_host():
     return os.environ.get("SMARTNODE_HOST", "127.0.0.1")
 
 
+def get_seed():
+    """从环境变量 SMARTNODE_SEED 读取随机种子（未设置返回 None=非确定性）。"""
+    raw = os.environ.get("SMARTNODE_SEED")
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 def get_bind_port():
     try:
         return int(os.environ.get("SMARTNODE_PORT", "5000"))

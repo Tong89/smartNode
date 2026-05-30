@@ -507,6 +507,12 @@ class SimulationEngine:
             req_tag = f"[REQ:{request.id}]" if request else ""
             print(f"{timestamp} {level_tag}{req_tag} {message}")
     
+    def reseed(self, seed):
+        """重置随机源以进入确定性模式（影响后续地面站抽样/调度/背景任务/轨道生成）。"""
+        with self.lock:
+            self.rng = random.Random(seed)
+        return self
+
     def start_simulation(self):
         """启动仿真线程"""
         self.running = True
@@ -1906,7 +1912,13 @@ class SimulationEngine:
         )
 
 def create_engine(seed=None, autostart=True):
-    """工厂：创建引擎实例，可注入随机种子以保证可复现；autostart 控制是否启动后台线程。"""
+    """工厂：创建引擎实例，可注入随机种子以保证可复现；autostart 控制是否启动后台线程。
+
+    未显式传 seed 时回退到环境变量 SMARTNODE_SEED（确定性模式）。
+    """
+    if seed is None:
+        from backend.config import get_seed
+        seed = get_seed()
     rng = random.Random(seed) if seed is not None else random.Random()
     return SimulationEngine(rng=rng, autostart=autostart)
 
