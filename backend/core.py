@@ -1782,8 +1782,19 @@ class SimulationEngine:
                         satellite = sat
                         break
                 if not satellite:
-                    # 如果找不到指定的卫星，返回结构化错误 dict（保持返回类型一致，避免 jsonify 误处理元组）
-                    return {"status": "error", "error": f"未找到指定的卫星: {satellite_id}"}
+                    # 标准化拒绝结果（结构与正常返回对齐），并补充日志与统计计数
+                    reason = f"未找到指定的卫星: {satellite_id}"
+                    self.stats["total_requests"] += 1
+                    self.stats["user_requests"] += 1
+                    self.stats["rejected_requests"] += 1
+                    self._record_rejection("SATELLITE_NOT_FOUND")
+                    self._log(f"请求被拒绝 - {reason}", level="normal")
+                    return {
+                        "status": "error",
+                        "reject_reason": reason,
+                        "error": reason,
+                        "available_satellites": [s.sat_id for s in self.leo_satellites],
+                    }
             else:
                 # 如果没有指定卫星，使用负载均衡选择
                 satellite_loads = {}
