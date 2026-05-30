@@ -837,6 +837,188 @@ progress::-moz-progress-bar {
   display: none !important;
 }
 
+/* ── 统计图表面板 ────────────────────────────────────────────────────── */
+.stats-charts-panel .charts-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.stats-charts-panel .charts-empty svg {
+  width: 32px;
+  height: 32px;
+  opacity: 0.45;
+}
+
+.charts-body {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px 16px;
+}
+
+.chart-card {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 12px 14px;
+}
+
+.chart-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-unit {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Donut chart */
+.donut-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.donut-svg {
+  width: 100px;
+  height: 100px;
+  flex-shrink: 0;
+}
+
+.donut-pct {
+  font-size: 18px;
+  font-weight: 800;
+  fill: var(--ink);
+}
+
+.donut-label {
+  font-size: 9px;
+  fill: var(--muted);
+}
+
+.donut-legend {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.donut-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.donut-legend-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.donut-legend-row strong {
+  margin-left: auto;
+  font-size: 14px;
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* Sparkline */
+.sparkline-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sparkline-svg {
+  flex: 1;
+  min-width: 0;
+  height: 56px;
+  display: block;
+  overflow: visible;
+}
+
+.sparkline-stat {
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.sparkline-stat strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--accent-2);
+}
+
+.sparkline-stat span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Bar chart */
+.bar-chart {
+  display: grid;
+  gap: 8px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) 2fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.bar-label {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-track {
+  height: 10px;
+  background: #dde5df;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: var(--red);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.bar-count {
+  font-weight: 700;
+  text-align: right;
+  min-width: 24px;
+}
+
+.charts-empty-small {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 0;
+}
+
 @media (max-width: 1180px) {
   .topbar {
     grid-template-columns: 1fr auto;

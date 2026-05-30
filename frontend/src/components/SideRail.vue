@@ -36,6 +36,15 @@
       <i data-lucide="gantt-chart"></i>
       <span>时间轴</span>
     </button>
+    <button
+      :class="{ active: activeView === 'stats' }"
+      type="button"
+      @click="$emit('set-view', 'stats')"
+      title="统计图表"
+    >
+      <i data-lucide="bar-chart-2"></i>
+      <span>统计</span>
+    </button>
   </nav>
 </template>
 
