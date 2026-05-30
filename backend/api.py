@@ -740,6 +740,34 @@ def health_check():
     })
 
 
+@app.route('/api/livez')
+def liveness_probe():
+    """存活探针：进程可响应即存活。"""
+    return jsonify({'status': 'alive'})
+
+
+@app.route('/api/readyz')
+def readiness_probe():
+    """就绪探针：仿真线程存活才视为就绪，否则 503。"""
+    thread = simulation_engine.simulation_thread
+    ready = bool(simulation_engine.running and thread and thread.is_alive())
+    body = {'status': 'ready' if ready else 'not_ready', 'simulation_running': simulation_engine.running}
+    return (jsonify(body), 200) if ready else (jsonify(body), 503)
+
+
+@app.route('/api/quota')
+def quota_status():
+    """返回当前身份的限流配额信息（用于客户端自适应退避）。"""
+    ident = getattr(g, 'identity', {}) or {}
+    return ok({
+        'identity': ident.get('sub') or ident.get('auth', 'open'),
+        'limits': {
+            'submit_request': {'limit': 30, 'window_seconds': 60},
+            'update_config': {'limit': 10, 'window_seconds': 60},
+        },
+    })
+
+
 @app.route('/favicon.ico')
 def favicon():
     """返回空favicon避免404错误"""
