@@ -1,0 +1,745 @@
+{
+  "ground_stations": [
+    {
+      "id": "GS_001",
+      "name": "哈尔滨站",
+      "lat": 45.75,
+      "lon": 126.65,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_002",
+      "name": "长春站",
+      "lat": 43.88,
+      "lon": 125.32,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_003",
+      "name": "沈阳站",
+      "lat": 41.8,
+      "lon": 123.43,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_004",
+      "name": "大连站",
+      "lat": 38.91,
+      "lon": 121.62,
+      "antenna_type": "Ka",
+      "max_links": 1
+    },
+    {
+      "id": "GS_005",
+      "name": "齐齐哈尔站",
+      "lat": 47.35,
+      "lon": 123.92,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_006",
+      "name": "北京站",
+      "lat": 39.9,
+      "lon": 116.4,
+      "antenna_type": "Ka",
+      "max_links": 4
+    },
+    {
+      "id": "GS_007",
+      "name": "天津站",
+      "lat": 39.13,
+      "lon": 117.2,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_008",
+      "name": "石家庄站",
+      "lat": 38.04,
+      "lon": 114.48,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_009",
+      "name": "太原站",
+      "lat": 37.87,
+      "lon": 112.55,
+      "antenna_type": "X",
+      "max_links": 2
+    },
+    {
+      "id": "GS_010",
+      "name": "呼和浩特站",
+      "lat": 40.84,
+      "lon": 111.75,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_011",
+      "name": "上海站",
+      "lat": 31.23,
+      "lon": 121.47,
+      "antenna_type": "Ka",
+      "max_links": 4
+    },
+    {
+      "id": "GS_012",
+      "name": "南京站",
+      "lat": 32.06,
+      "lon": 118.8,
+      "antenna_type": "Ka",
+      "max_links": 3
+    },
+    {
+      "id": "GS_013",
+      "name": "杭州站",
+      "lat": 30.27,
+      "lon": 120.15,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_014",
+      "name": "合肥站",
+      "lat": 31.82,
+      "lon": 117.23,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_015",
+      "name": "济南站",
+      "lat": 36.67,
+      "lon": 116.98,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_016",
+      "name": "青岛站",
+      "lat": 36.07,
+      "lon": 120.38,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_017",
+      "name": "福州站",
+      "lat": 26.07,
+      "lon": 119.3,
+      "antenna_type": "X",
+      "max_links": 2
+    },
+    {
+      "id": "GS_018",
+      "name": "厦门站",
+      "lat": 24.48,
+      "lon": 118.09,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_019",
+      "name": "南昌站",
+      "lat": 28.68,
+      "lon": 115.86,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_020",
+      "name": "宁波站",
+      "lat": 29.87,
+      "lon": 121.55,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_021",
+      "name": "武汉站",
+      "lat": 30.58,
+      "lon": 114.27,
+      "antenna_type": "Ka",
+      "max_links": 3
+    },
+    {
+      "id": "GS_022",
+      "name": "长沙站",
+      "lat": 28.23,
+      "lon": 112.94,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_023",
+      "name": "郑州站",
+      "lat": 34.76,
+      "lon": 113.65,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_024",
+      "name": "洛阳站",
+      "lat": 34.62,
+      "lon": 112.45,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_025",
+      "name": "襄阳站",
+      "lat": 32.01,
+      "lon": 112.14,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_026",
+      "name": "广州站",
+      "lat": 23.13,
+      "lon": 113.26,
+      "antenna_type": "Ka",
+      "max_links": 3
+    },
+    {
+      "id": "GS_027",
+      "name": "深圳站",
+      "lat": 22.54,
+      "lon": 114.06,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_028",
+      "name": "南宁站",
+      "lat": 22.82,
+      "lon": 108.32,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_029",
+      "name": "海口站",
+      "lat": 20.04,
+      "lon": 110.2,
+      "antenna_type": "X",
+      "max_links": 2
+    },
+    {
+      "id": "GS_030",
+      "name": "三亚站",
+      "lat": 18.0,
+      "lon": 109.0,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_031",
+      "name": "成都站",
+      "lat": 30.57,
+      "lon": 104.07,
+      "antenna_type": "Ka",
+      "max_links": 3
+    },
+    {
+      "id": "GS_032",
+      "name": "重庆站",
+      "lat": 29.56,
+      "lon": 106.55,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_033",
+      "name": "昆明站",
+      "lat": 25.04,
+      "lon": 102.71,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_034",
+      "name": "贵阳站",
+      "lat": 26.58,
+      "lon": 106.72,
+      "antenna_type": "X",
+      "max_links": 2
+    },
+    {
+      "id": "GS_035",
+      "name": "拉萨站",
+      "lat": 29.65,
+      "lon": 91.13,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_036",
+      "name": "西昌站",
+      "lat": 27.9,
+      "lon": 102.26,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_037",
+      "name": "西安站",
+      "lat": 34.27,
+      "lon": 108.95,
+      "antenna_type": "Ka",
+      "max_links": 3
+    },
+    {
+      "id": "GS_038",
+      "name": "兰州站",
+      "lat": 36.06,
+      "lon": 103.83,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_039",
+      "name": "乌鲁木齐站",
+      "lat": 43.82,
+      "lon": 87.62,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_040",
+      "name": "银川站",
+      "lat": 38.49,
+      "lon": 106.23,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_041",
+      "name": "西宁站",
+      "lat": 36.62,
+      "lon": 101.78,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_042",
+      "name": "喀什站",
+      "lat": 39.0,
+      "lon": 76.0,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_043",
+      "name": "酒泉站",
+      "lat": 39.74,
+      "lon": 98.49,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_044",
+      "name": "漠河站",
+      "lat": 52.97,
+      "lon": 122.53,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_045",
+      "name": "满洲里站",
+      "lat": 49.6,
+      "lon": 117.45,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_046",
+      "name": "佳木斯站",
+      "lat": 46.0,
+      "lon": 130.0,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_047",
+      "name": "丹东站",
+      "lat": 40.0,
+      "lon": 124.38,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_048",
+      "name": "延吉站",
+      "lat": 42.89,
+      "lon": 129.51,
+      "antenna_type": "X",
+      "max_links": 1
+    },
+    {
+      "id": "GS_049",
+      "name": "文昌站",
+      "lat": 19.61,
+      "lon": 110.75,
+      "antenna_type": "Ka",
+      "max_links": 2
+    },
+    {
+      "id": "GS_050",
+      "name": "珠海站",
+      "lat": 22.27,
+      "lon": 113.58,
+      "antenna_type": "X",
+      "max_links": 1
+    }
+  ],
+  "leo_satellites": [
+    {
+      "name": "遥感一号",
+      "sat_id": "LEO_001",
+      "a": 6871,
+      "e": 0.001,
+      "i": 97.4,
+      "raan": 0,
+      "omega": 0,
+      "M0": 0
+    },
+    {
+      "name": "遥感二号",
+      "sat_id": "LEO_002",
+      "a": 6871,
+      "e": 0.001,
+      "i": 97.4,
+      "raan": 45,
+      "omega": 0,
+      "M0": 90
+    },
+    {
+      "name": "遥感三号",
+      "sat_id": "LEO_003",
+      "a": 6871,
+      "e": 0.001,
+      "i": 97.4,
+      "raan": 90,
+      "omega": 0,
+      "M0": 180
+    },
+    {
+      "name": "遥感四号",
+      "sat_id": "LEO_004",
+      "a": 6871,
+      "e": 0.001,
+      "i": 97.4,
+      "raan": 135,
+      "omega": 0,
+      "M0": 270
+    },
+    {
+      "name": "光学遥感一号",
+      "sat_id": "LEO_006",
+      "a": 6771,
+      "e": 0.001,
+      "i": 63.4,
+      "raan": 30,
+      "omega": 0,
+      "M0": 120
+    },
+    {
+      "name": "光学遥感二号",
+      "sat_id": "LEO_007",
+      "a": 6771,
+      "e": 0.001,
+      "i": 63.4,
+      "raan": 75,
+      "omega": 0,
+      "M0": 210
+    },
+    {
+      "name": "SAR卫星一号",
+      "sat_id": "LEO_008",
+      "a": 6921,
+      "e": 0.001,
+      "i": 98.2,
+      "raan": 120,
+      "omega": 0,
+      "M0": 60
+    },
+    {
+      "name": "SAR卫星二号",
+      "sat_id": "LEO_009",
+      "a": 6921,
+      "e": 0.001,
+      "i": 98.2,
+      "raan": 165,
+      "omega": 0,
+      "M0": 150
+    }
+  ],
+  "geo_relays": [
+    {
+      "id": "GEO_001",
+      "name": "天链二号-01",
+      "lon": 80.0,
+      "antenna": {
+        "type": "Ka",
+        "frequency": "26.5-40 GHz",
+        "beam_width": 0.5,
+        "beam_count": 4,
+        "beam_gain": 50,
+        "beam_steering": "electronic",
+        "polarization": "dual",
+        "scan_range": {
+          "azimuth": [
+            -60,
+            60
+          ],
+          "elevation": [
+            10,
+            90
+          ]
+        }
+      },
+      "beams": [
+        {
+          "id": "B1",
+          "azimuth": 0,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B2",
+          "azimuth": 30,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B3",
+          "azimuth": -30,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B4",
+          "azimuth": 0,
+          "elevation": 70,
+          "status": "free",
+          "target": null
+        }
+      ],
+      "bandwidth": 1600,
+      "coverage": {
+        "fov": 120,
+        "min_elevation": 10,
+        "visibility_range": "全球约1/3"
+      }
+    },
+    {
+      "id": "GEO_002",
+      "name": "天链二号-02",
+      "lon": 171.0,
+      "antenna": {
+        "type": "Ka",
+        "frequency": "26.5-40 GHz",
+        "beam_width": 0.5,
+        "beam_count": 4,
+        "beam_gain": 50,
+        "beam_steering": "electronic",
+        "polarization": "dual",
+        "scan_range": {
+          "azimuth": [
+            -60,
+            60
+          ],
+          "elevation": [
+            10,
+            90
+          ]
+        }
+      },
+      "beams": [
+        {
+          "id": "B1",
+          "azimuth": 0,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B2",
+          "azimuth": 30,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B3",
+          "azimuth": -30,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B4",
+          "azimuth": 0,
+          "elevation": 70,
+          "status": "free",
+          "target": null
+        }
+      ],
+      "bandwidth": 1600,
+      "coverage": {
+        "fov": 120,
+        "min_elevation": 10,
+        "visibility_range": "全球约1/3"
+      }
+    },
+    {
+      "id": "GEO_003",
+      "name": "天链二号-03",
+      "lon": 10.5,
+      "antenna": {
+        "type": "Ka",
+        "frequency": "26.5-40 GHz",
+        "beam_width": 0.5,
+        "beam_count": 4,
+        "beam_gain": 50,
+        "beam_steering": "electronic",
+        "polarization": "dual",
+        "scan_range": {
+          "azimuth": [
+            -60,
+            60
+          ],
+          "elevation": [
+            10,
+            90
+          ]
+        }
+      },
+      "beams": [
+        {
+          "id": "B1",
+          "azimuth": 0,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B2",
+          "azimuth": 30,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B3",
+          "azimuth": -30,
+          "elevation": 45,
+          "status": "free",
+          "target": null
+        },
+        {
+          "id": "B4",
+          "azimuth": 0,
+          "elevation": 70,
+          "status": "free",
+          "target": null
+        }
+      ],
+      "bandwidth": 1600,
+      "coverage": {
+        "fov": 120,
+        "min_elevation": 10,
+        "visibility_range": "全球约1/3"
+      }
+    }
+  ],
+  "data_types": {
+    "TASK_CMD": {
+      "name": "任务指令",
+      "size_range": [
+        10,
+        100
+      ],
+      "size_unit": "KB",
+      "priority_range": [
+        8,
+        10
+      ],
+      "max_wait_limit": 1800,
+      "allowed_links": [
+        "relay"
+      ],
+      "beta": 0.5,
+      "base_value": 150.0,
+      "immediate": true
+    },
+    "INTEL": {
+      "name": "情报信息",
+      "size_range": [
+        500,
+        5000
+      ],
+      "size_unit": "KB",
+      "priority_range": [
+        7,
+        10
+      ],
+      "max_wait_limit": 1800,
+      "allowed_links": [
+        "relay"
+      ],
+      "beta": 0.2,
+      "base_value": 120.0,
+      "immediate": true
+    },
+    "DATA_SLICE": {
+      "name": "数据切片",
+      "size_range": [
+        50,
+        500
+      ],
+      "size_unit": "MB",
+      "priority_range": [
+        3,
+        7
+      ],
+      "max_wait_limit": 1800,
+      "allowed_links": [
+        "direct",
+        "relay"
+      ],
+      "beta": 0.05,
+      "base_value": 80.0
+    },
+    "RAW_IMAGE": {
+      "name": "原始影像",
+      "size_range": [
+        2,
+        10
+      ],
+      "size_unit": "GB",
+      "priority_range": [
+        1,
+        5
+      ],
+      "max_wait_limit": 1800,
+      "allowed_links": [
+        "direct"
+      ],
+      "beta": 0.01,
+      "base_value": 40.0
+    }
+  }
+}
