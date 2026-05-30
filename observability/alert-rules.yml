@@ -1,0 +1,131 @@
+# alert-rules.yml — Alertmanager / Prometheus alert rules for SmartNode
+#
+# Load into Prometheus via the `rule_files` section of prometheus.yml:
+#
+#   rule_files:
+#     - /etc/prometheus/alert-rules.yml
+#
+# Or map it into the Prometheus container in docker-compose.yml:
+#   volumes:
+#     - ./observability/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+#
+# Requires Prometheus ≥ 2.40 and the SmartNode /metrics endpoint to be scraped.
+# For Alertmanager routing / receivers, configure alertmanager.yml separately.
+
+groups:
+  # ---------------------------------------------------------------------------
+  # Simulation health — thread liveness & readiness probe
+  # ---------------------------------------------------------------------------
+  - name: smartnode.simulation
+    interval: 15s
+    rules:
+      # Fires when the simulation background thread has died (or never started).
+      # Scrapes the /api/readyz endpoint label exported by the backend.
+      # Severity: critical — the platform is not usable without the sim thread.
+      - alert: SimulationThreadDead
+        expr: |
+          smartnode_simulation_running == 0
+          or absent(smartnode_simulation_running)
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "SmartNode simulation thread is dead"
+          description: |
+            The SmartNode simulation engine thread has stopped or failed to start.
+            The /api/ready endpoint is returning HTTP 503.
+            Instance: {{ $labels.instance }}
+            Value: {{ $value }}
+          runbook_url: "https://github.com/Tong89/smartNode/blob/main/docs/runbooks/simulation-thread-dead.md"
+
+      # Fires when the readiness probe has been unhealthy for more than 2 minutes.
+      # Uses the HTTP probe metric if blackbox-exporter is available; falls back
+      # to the simulation_running gauge.
+      - alert: SmartNodeReadinessProbeUnhealthy
+        expr: |
+          (
+            probe_success{job="smartnode-readyz"} == 0
+          )
+          or
+          (
+            absent(probe_success{job="smartnode-readyz"})
+            and smartnode_simulation_running == 0
+          )
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "SmartNode readiness probe has been failing"
+          description: |
+            The /api/ready (or /api/readyz) probe has been unhealthy for > 2 minutes.
+            K8s / Compose health checks will route traffic away from this instance.
+            Instance: {{ $labels.instance }}
+          runbook_url: "https://github.com/Tong89/smartNode/blob/main/docs/runbooks/readiness-unhealthy.md"
+
+  # ---------------------------------------------------------------------------
+  # API error rate
+  # ---------------------------------------------------------------------------
+  - name: smartnode.api
+    interval: 30s
+    rules:
+      # Fires when the 5xx error rate over the last 5 minutes exceeds 5 %.
+      # Uses the http_requests_total counter emitted by the Flask metrics middleware.
+      - alert: SmartNodeHighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="smartnode", status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="smartnode"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "SmartNode API 5xx error rate is elevated (> 5 %)"
+          description: |
+            The fraction of HTTP 5xx responses from the SmartNode backend has
+            exceeded 5 % over the last 5 minutes.
+            Current rate: {{ $value | humanizePercentage }}
+            Instance: {{ $labels.instance }}
+          runbook_url: "https://github.com/Tong89/smartNode/blob/main/docs/runbooks/high-error-rate.md"
+
+      # Critical threshold: > 20 % error rate for 2 minutes.
+      - alert: SmartNodeCriticalErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{job="smartnode", status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="smartnode"}[5m]))
+          ) > 0.20
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "SmartNode API 5xx error rate is critically high (> 20 %)"
+          description: |
+            More than 20 % of requests to the SmartNode backend are returning
+            HTTP 5xx within the last 2 minutes. Immediate investigation required.
+            Current rate: {{ $value | humanizePercentage }}
+            Instance: {{ $labels.instance }}
+          runbook_url: "https://github.com/Tong89/smartNode/blob/main/docs/runbooks/high-error-rate.md"
+
+      # Dead-man switch: alerts when NO requests have been received for 10 minutes.
+      # Catches cases where the entire service has gone silent (crash / network split).
+      - alert: SmartNodeNoTraffic
+        expr: |
+          absent(
+            rate(http_requests_total{job="smartnode"}[10m])
+          )
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "SmartNode is receiving no HTTP traffic"
+          description: |
+            No HTTP requests have been observed on the smartnode job for 10 minutes.
+            The service may be unreachable or the scrape target may have disappeared.
