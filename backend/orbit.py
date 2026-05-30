@@ -15,6 +15,11 @@ import math
 from datetime import datetime
 
 from backend.physics.coordinates import ecef_to_lla, eci_to_ecef
+from backend.physics.propagator import (
+    j2_raan_rate,
+    j2_arg_perigee_rate,
+    j2_mean_anomaly_rate_correction,
+)
 
 
 def calc_central_angle(lat1, lon1, lat2, lon2):
@@ -46,7 +51,8 @@ class OrbitalElements:
     def __init__(self, name, sat_id,
                  semi_major_axis, eccentricity, inclination,
                  raan, arg_perigee, mean_anomaly, epoch=None,
-                 tle_line1=None, tle_line2=None):
+                 tle_line1=None, tle_line2=None,
+                 j2_perturbation=True):
         self.name = name
         self.sat_id = sat_id
         self.a = semi_major_axis
@@ -61,6 +67,8 @@ class OrbitalElements:
         # 可选 TLE 字段（非空时启用 SGP4 传播）
         self.tle_line1 = tle_line1
         self.tle_line2 = tle_line2
+        # J2 摄动开关（默认开启；设为 False 可禁用以复现纯二体结果）
+        self.j2_perturbation = j2_perturbation
         # 延迟初始化 Propagator（避免循环导入问题）
         self._propagator = None
 
@@ -94,14 +102,41 @@ class OrbitalElements:
         return self._propagate_kepler(current_time)
 
     def _propagate_kepler(self, current_time):
-        """开普勒二体解析传播，返回 (lat°, lon°, alt m)。"""
+        """开普勒二体解析传播（可选 J2 摄动修正），返回 (lat°, lon°, alt m)。
+
+        当 ``self.j2_perturbation`` 为 ``True``（默认）时，在二体开普勒传播基础上
+        叠加 J2 带谐系数引起的长期摄动修正：
+
+        * 升交点赤经 (RAAN) 进动：dΩ/dt = -(3/2) n J2 (Rₑ/p)² cos i
+        * 近地点幅角漂移：dω/dt = (3/2) n J2 (Rₑ/p)² (2 - 5/2 sin²i)
+        * 平近点角速率修正：dM/dt += (3/2) n J2 (Rₑ/p)² √(1-e²) (1 - 3/2 sin²i)
+
+        仅作用于二体回退路径（SGP4 路径已内含摄动，不重复）。
+        """
         if isinstance(current_time, datetime):
             dt_seconds = (current_time - self.epoch).total_seconds()
         else:
             dt_seconds = current_time
 
         n = self.get_mean_motion()
-        M = math.radians(self.M0) + n * dt_seconds
+
+        # ---- J2 长期摄动修正 -----------------------------------------------
+        if self.j2_perturbation:
+            # 各轨道要素在 dt 内的长期漂移量（弧度）
+            n_M_corr = j2_mean_anomaly_rate_correction(self.a, self.e, self.i)
+            raan_rad = math.radians(self.raan) + j2_raan_rate(
+                self.a, self.e, self.i
+            ) * dt_seconds
+            omega_rad = math.radians(self.omega) + j2_arg_perigee_rate(
+                self.a, self.e, self.i
+            ) * dt_seconds
+            M = math.radians(self.M0) + (n + n_M_corr) * dt_seconds
+        else:
+            raan_rad = math.radians(self.raan)
+            omega_rad = math.radians(self.omega)
+            M = math.radians(self.M0) + n * dt_seconds
+        # -----------------------------------------------------------------------
+
         M = M % (2 * math.pi)
 
         E = M
@@ -117,12 +152,12 @@ class OrbitalElements:
         x_orb = r * math.cos(nu)
         y_orb = r * math.sin(nu)
 
-        cos_O = math.cos(math.radians(self.raan))
-        sin_O = math.sin(math.radians(self.raan))
+        cos_O = math.cos(raan_rad)
+        sin_O = math.sin(raan_rad)
         cos_i = math.cos(math.radians(self.i))
         sin_i = math.sin(math.radians(self.i))
-        cos_w = math.cos(math.radians(self.omega))
-        sin_w = math.sin(math.radians(self.omega))
+        cos_w = math.cos(omega_rad)
+        sin_w = math.sin(omega_rad)
 
         x = (cos_O * cos_w - sin_O * sin_w * cos_i) * x_orb + \
             (-cos_O * sin_w - sin_O * cos_w * cos_i) * y_orb
@@ -140,7 +175,8 @@ class OrbitalElements:
     @classmethod
     def from_tle(cls, name: str, sat_id: str,
                  tle_line1: str, tle_line2: str,
-                 epoch=None) -> "OrbitalElements":
+                 epoch=None,
+                 j2_perturbation=True) -> "OrbitalElements":
         """由 TLE 两行根数构造 OrbitalElements，轨道根数从 TLE 解析填充。
 
         SGP4 传播时直接使用 TLE 数据；轨道根数字段仅用于回退和元数据。
@@ -197,6 +233,7 @@ class OrbitalElements:
             epoch=epoch,
             tle_line1=tle_line1,
             tle_line2=tle_line2,
+            j2_perturbation=j2_perturbation,
         )
 
 

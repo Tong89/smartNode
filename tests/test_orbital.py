@@ -149,10 +149,27 @@ class TestPropagateISSLike:
         assert alt == pytest.approx(ref["t0_alt_m"], abs=ref["t0_tol"])
 
     def test_one_period_latitude_returns(self, iss_like):
-        """经过整数周期后纬度应回到与 t=0 几乎相同的值（二体无摄动）。"""
-        T = iss_like.get_orbital_period()
-        lat0, _, _ = iss_like.propagate(0.0)
-        lat1, _, _ = iss_like.propagate(T)
+        """经过整数周期后纬度应回到与 t=0 几乎相同的值（纯二体，禁用 J2）。
+
+        J2 摄动会改变有效平均角速度（M 修正量），导致 Keplerian 周期后位置略有漂移；
+        本测试聚焦纯二体基准，故显式关闭 J2。
+        """
+        from backend.orbit import OrbitalElements
+        oe = OrbitalElements(
+            name=iss_like.name,
+            sat_id=iss_like.sat_id,
+            semi_major_axis=iss_like.a,
+            eccentricity=iss_like.e,
+            inclination=iss_like.i,
+            raan=iss_like.raan,
+            arg_perigee=iss_like.omega,
+            mean_anomaly=iss_like.M0,
+            epoch=iss_like.epoch,
+            j2_perturbation=False,
+        )
+        T = oe.get_orbital_period()
+        lat0, _, _ = oe.propagate(0.0)
+        lat1, _, _ = oe.propagate(T)
         assert lat1 == pytest.approx(lat0, abs=0.01)
 
     def test_one_period_altitude_returns(self, iss_like):

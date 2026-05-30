@@ -22,6 +22,17 @@ from backend.physics.coordinates import ecef_to_lla, eci_to_ecef, OMEGA_EARTH
 logger = logging.getLogger("smartnode.physics.propagator")
 
 # ---------------------------------------------------------------------------
+# J2 摄动常量
+# ---------------------------------------------------------------------------
+
+#: 地球引力常数 (km³/s²)
+MU_EARTH: float = 398600.4418
+#: 地球赤道半径 (km)
+R_EARTH_KM: float = 6378.137
+#: J2 带谐系数（WGS-84）
+J2: float = 1.08262668e-3
+
+# ---------------------------------------------------------------------------
 # TLE 解析与 SGP4 传播（可选依赖，优雅降级）
 # ---------------------------------------------------------------------------
 try:
@@ -64,6 +75,94 @@ def _gmst(t: datetime) -> float:
         + 0.000387933 * t0 * t0
     )
     return math.radians(theta_deg % 360.0)
+
+
+# ---------------------------------------------------------------------------
+# J2 长期摄动速率
+# ---------------------------------------------------------------------------
+
+def j2_raan_rate(a: float, e: float, i_deg: float) -> float:
+    """升交点赤经 (RAAN) 因 J2 引起的长期进动速率 (rad/s)。
+
+    公式（一阶 J2 长期项）::
+
+        dΩ/dt = -(3/2) * n * J2 * (R_e/p)² * cos(i)
+
+    其中 p = a(1 - e²) 为半通径，n 为平均角速度。
+
+    参数
+    ----
+    a : float
+        轨道半长轴 (km)。
+    e : float
+        轨道离心率 (无量纲)。
+    i_deg : float
+        轨道倾角 (°)。
+
+    返回
+    ----
+    float
+        RAAN 进动速率 (rad/s)；负值表示向西进动（顺行轨道）。
+    """
+    n = math.sqrt(MU_EARTH / a ** 3)           # rad/s
+    p = a * (1.0 - e * e)                       # 半通径 km
+    cos_i = math.cos(math.radians(i_deg))
+    return -1.5 * n * J2 * (R_EARTH_KM / p) ** 2 * cos_i
+
+
+def j2_arg_perigee_rate(a: float, e: float, i_deg: float) -> float:
+    """近地点幅角 (ω) 因 J2 引起的长期进动速率 (rad/s)。
+
+    公式::
+
+        dω/dt = (3/2) * n * J2 * (R_e/p)² * (2 - (5/2)*sin²(i))
+
+    参数
+    ----
+    a : float
+        轨道半长轴 (km)。
+    e : float
+        轨道离心率 (无量纲)。
+    i_deg : float
+        轨道倾角 (°)。
+
+    返回
+    ----
+    float
+        近地点幅角进动速率 (rad/s)。
+    """
+    n = math.sqrt(MU_EARTH / a ** 3)
+    p = a * (1.0 - e * e)
+    sin2_i = math.sin(math.radians(i_deg)) ** 2
+    return 1.5 * n * J2 * (R_EARTH_KM / p) ** 2 * (2.0 - 2.5 * sin2_i)
+
+
+def j2_mean_anomaly_rate_correction(a: float, e: float, i_deg: float) -> float:
+    """平近点角 (M) 因 J2 引起的长期修正速率 (rad/s)，在平均角速度 n 基础上的附加量。
+
+    公式（J2 对平均角速度的一阶修正）::
+
+        dM/dt|J2 = (3/2) * n * J2 * (R_e/p)² * sqrt(1-e²) * (1 - (3/2)*sin²(i))
+
+    参数
+    ----
+    a : float
+        轨道半长轴 (km)。
+    e : float
+        轨道离心率 (无量纲)。
+    i_deg : float
+        轨道倾角 (°)。
+
+    返回
+    ----
+    float
+        平近点角速率附加修正量 (rad/s)。
+    """
+    n = math.sqrt(MU_EARTH / a ** 3)
+    p = a * (1.0 - e * e)
+    eta = math.sqrt(1.0 - e * e)
+    sin2_i = math.sin(math.radians(i_deg)) ** 2
+    return 1.5 * n * J2 * (R_EARTH_KM / p) ** 2 * eta * (1.0 - 1.5 * sin2_i)
 
 
 # ---------------------------------------------------------------------------
