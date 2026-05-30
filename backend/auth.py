@@ -60,7 +60,7 @@ def decode_token(token):
     return jwt.decode(token, jwt_secret(), algorithms=[JWT_ALGORITHM])
 
 # 匿名可访问的精确路径与前缀白名单
-PUBLIC_PATHS = {"/", "/api/health", "/favicon.ico", "/api/auth/login", "/api/auth/refresh", "/api/openapi.json", "/docs"}
+PUBLIC_PATHS = {"/", "/api/health", "/favicon.ico", "/api/auth/login", "/api/auth/refresh", "/api/openapi.json", "/docs", "/api/livez", "/api/readyz"}
 PUBLIC_PREFIXES = ("/frontend", "/static")
 
 
