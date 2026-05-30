@@ -40,6 +40,10 @@ const app = Vue.createApp({
       // Cesium 增量更新：实体索引表，避免每次 removeAll 重建场景
       _entityIndex: {},      // id -> Cesium.Entity，管理节点（卫星、地面站、中继）
       _linkIndex: {},        // linkKey -> Cesium.Entity，管理链路 polyline
+      // 轨道轨迹索引：satId -> { orbitEntity, groundEntity }
+      _trackIndex: {},
+      _tracksLoading: false,
+      _tracksLastRefresh: 0,  // 上次刷新轨迹的仿真时刻（用于节流）
       systemData: {},
       systemInfo: {},
       resourceStatus: {},
@@ -213,6 +217,7 @@ const app = Vue.createApp({
     // 清空增量更新索引，防止后续残留引用
     this._entityIndex = {};
     this._linkIndex = {};
+    this._trackIndex = {};
   },
 
   methods: {
@@ -627,6 +632,9 @@ const app = Vue.createApp({
       }
 
       this.viewer.scene.requestRender();
+
+      // 轨道轨迹节流刷新：每隔约半个轨道周期（或首次）才重新采样
+      this._refreshOrbitTracksIfNeeded();
     },
 
     /**
@@ -728,6 +736,106 @@ const app = Vue.createApp({
     drawRequestLinks(req, satellite, geoMap, gsMap, color) {
       const liveLinkKeys = new Set();
       this.updateRequestLinks(req, satellite, geoMap, gsMap, color, liveLinkKeys);
+    },
+
+    /**
+     * 节流控制器：仅当卫星数量变化或距上次刷新超过 60 秒（模拟时间）时才拉取新轨迹。
+     * 轨迹数据变化慢（轨道根数基本固定），无需每帧刷新。
+     */
+    _refreshOrbitTracksIfNeeded() {
+      const now = this.systemTime;
+      const elapsed = now - this._tracksLastRefresh;
+      const satCount = this.satellites.length;
+      const trackedCount = Object.keys(this._trackIndex).length;
+      // 首次、卫星数量变化、或距上次刷新超过 60 秒时刷新
+      if (trackedCount === 0 || Math.abs(satCount - trackedCount) > 0 || elapsed > 60) {
+        this.refreshOrbitTracks();
+      }
+    },
+
+    /**
+     * 从 /api/orbit_tracks 拉取各卫星的轨道采样点，并在 Cesium 中绘制：
+     * - 空间轨道折线（带高度，颜色区分 LEO/MEO）
+     * - 贴地星下点轨迹（alt=0）
+     * 复用已有实体，仅在卫星集合变化时重建。
+     */
+    async refreshOrbitTracks() {
+      if (!this.viewer || !this.cesiumReady || !window.Cesium) return;
+      if (this._tracksLoading) return;
+      this._tracksLoading = true;
+      try {
+        const data = await this.fetchJson('/api/orbit_tracks?steps=90');
+        if (!data || !Array.isArray(data.tracks)) return;
+        this._tracksLastRefresh = this.systemTime;
+
+        // LEO 轨道颜色（橙黄）；MEO 轨道颜色（浅蓝）；星下点轨迹半透明
+        const leoOrbitColor = Cesium.Color.fromCssColorString('#f5a623').withAlpha(0.75);
+        const meoOrbitColor = Cesium.Color.fromCssColorString('#7ec8e3').withAlpha(0.75);
+        const leoGroundColor = Cesium.Color.fromCssColorString('#f5a623').withAlpha(0.35);
+        const meoGroundColor = Cesium.Color.fromCssColorString('#7ec8e3').withAlpha(0.35);
+
+        const liveSatIds = new Set(data.tracks.map((t) => t.id));
+
+        // 移除已消失卫星的轨迹实体
+        for (const satId of Object.keys(this._trackIndex)) {
+          if (!liveSatIds.has(satId)) {
+            const pair = this._trackIndex[satId];
+            if (pair.orbitEntity) this.viewer.entities.remove(pair.orbitEntity);
+            if (pair.groundEntity) this.viewer.entities.remove(pair.groundEntity);
+            delete this._trackIndex[satId];
+          }
+        }
+
+        // 新增或更新各卫星轨迹
+        for (const track of data.tracks) {
+          const orbitColor = track.type === 'MEO' ? meoOrbitColor : leoOrbitColor;
+          const groundColor = track.type === 'MEO' ? meoGroundColor : leoGroundColor;
+
+          const orbitPositions = track.orbit_points.map((p) =>
+            this.toCartesian(p.lon, p.lat, p.alt)
+          );
+          const groundPositions = track.ground_points.map((p) =>
+            this.toCartesian(p.lon, p.lat, 1000)  // 略高于地面以防 z-fighting
+          );
+
+          if (this._trackIndex[track.id]) {
+            // 更新已有实体的折线坐标
+            const pair = this._trackIndex[track.id];
+            pair.orbitEntity.polyline.positions = orbitPositions;
+            pair.groundEntity.polyline.positions = groundPositions;
+          } else {
+            // 新建轨道折线实体
+            const orbitEntity = this.viewer.entities.add({
+              polyline: {
+                positions: orbitPositions,
+                width: 1.5,
+                material: new Cesium.PolylineGlowMaterialProperty({
+                  glowPower: 0.15,
+                  color: orbitColor,
+                }),
+                arcType: Cesium.ArcType.NONE,
+              },
+            });
+            // 新建贴地星下点轨迹折线实体
+            const groundEntity = this.viewer.entities.add({
+              polyline: {
+                positions: groundPositions,
+                width: 1.0,
+                material: groundColor,
+                arcType: Cesium.ArcType.GEODESIC,
+              },
+            });
+            this._trackIndex[track.id] = { orbitEntity, groundEntity };
+          }
+        }
+
+        this.viewer.scene.requestRender();
+      } catch (e) {
+        // 轨迹加载失败不影响主场景更新
+        console.warn('轨道轨迹加载失败:', e.message || e);
+      } finally {
+        this._tracksLoading = false;
+      }
     },
 
     toCartesian(lon, lat, alt = 0) {
