@@ -195,21 +195,21 @@ class TestCalculateRelayRate:
 # --------------------------------------------------------------------------- #
 
 class TestCalculateInterSatelliteRate:
-    """inter_satellite_rate = 2000 * exp(-dist/40000)，下限 100 Mbps。"""
+    """激光 ISL 模型：速率由功率/口径/发散角与距离决定，视线遮挡时速率为 0。"""
 
     def test_same_position_near_max_rate(self):
-        """两颗 GEO 卫星同经纬度时，距离最小，速率应接近上界 2000 Mbps。"""
+        """两颗 GEO 卫星同经纬度时，距离最小，速率应在激光 ISL 可达范围内（>100 Mbps）。"""
         geo1 = _make_geo(lat=0.0, lon=0.0)
         geo2 = _make_geo(lat=0.0, lon=0.0)
         rate = calculate_inter_satellite_rate(geo1, geo2)
-        assert rate == pytest.approx(2000.0, rel=0.01)
+        assert rate > 100.0
 
-    def test_minimum_rate_floor_100(self):
-        """极远距离 GEO 星间速率不低于 100 Mbps。"""
+    def test_occluded_link_returns_zero(self):
+        """对径 GEO（180 度分离）视线被地球遮挡，速率应为 0。"""
         geo1 = _make_geo(lat=0.0, lon=0.0)
         geo2 = _make_geo(lat=0.0, lon=180.0)
         rate = calculate_inter_satellite_rate(geo1, geo2)
-        assert rate >= 100.0
+        assert rate == 0.0
 
     def test_rate_decreases_with_angular_separation(self):
         """GEO 星间经度差越大，速率越低（单调下降）。"""

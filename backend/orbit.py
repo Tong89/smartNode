@@ -30,6 +30,14 @@ from backend.comms.link_budget import (
     link_budget_relay,
     link_budget_inter_satellite,
 )
+from backend.comms.laser_isl import (
+    LaserISLModel,
+    laser_isl_rate,
+    laser_isl_check,
+)
+
+# 模块级激光 ISL 模型实例（默认参数）
+_LASER_ISL_MODEL = LaserISLModel()
 
 
 def calc_central_angle(lat1, lon1, lat2, lon2):
@@ -380,34 +388,36 @@ def calculate_relay_rate(sat_pos, geo_pos, gs, data_type=None):
 
 
 def calculate_inter_satellite_rate(geo1_pos, geo2_pos):
-    """GEO 星间链路速率 (Mbps)，由链路预算引擎驱动。
+    """GEO 星间激光链路速率 (Mbps)，由激光 ISL 物理模型驱动。
 
-    使用 60 GHz 毫米波 ISL 参数（高增益、宽带宽）。
+    使用激光通信模型：按发射功率/望远镜口径/光束发散角与两星距离计算
+    几何损耗与接收功率，并通过地球遮挡判定确认视线可见性。
+    当视线被地球遮挡时返回 0 (不可用)。
+
+    替换原来基于经验 exp 公式的 60 GHz 毫米波 ISL 估算。
     """
-    angle = calc_central_angle(
-        geo1_pos["lat"], geo1_pos["lon"],
-        geo2_pos["lat"], geo2_pos["lon"],
-    )
-    # GEO 轨道高度约 35786 km，两颗 GEO 之间的弦长
-    alt_km = geo1_pos["alt"] / 1000.0
-    dist_km = 2.0 * alt_km * math.sin(math.radians(angle) / 2.0)
-    dist_km = max(dist_km, 1.0)
-    result = link_budget_inter_satellite(distance_km=dist_km)
-    return max(result.achievable_rate_mbps, 100.0)
+    rate = laser_isl_rate(geo1_pos, geo2_pos, model=_LASER_ISL_MODEL)
+    # ISL 不可见（遮挡）时 rate=0，保持 0 传递给调用方
+    return rate
 
 
 def calculate_multi_hop_relay_rate(sat_pos, geo1_pos, geo2_pos, gs, data_type=None):
-    """多跳中继链路速率 (Mbps) - LEO→GEO1→GEO2→地面站，由链路预算引擎驱动。
+    """多跳中继链路速率 (Mbps) - LEO→GEO1→GEO2→地面站。
 
     计算三段链路的链路预算，取最小值作为端到端可达速率。
+    GEO1→GEO2 段改用激光 ISL 物理模型，含地球遮挡判定：
+    若两颗 GEO 之间视线被遮挡则该中继路径不可用（返回 0）。
     """
+    # GEO1 → GEO2 (激光 ISL)：先判断可见性，不可见则整条路径不通
+    rate2 = calculate_inter_satellite_rate(geo1_pos, geo2_pos)
+    if rate2 <= 0:
+        # GEO 间视线被地球遮挡，多跳中继路径不可用
+        return 0.0
+
     # LEO → GEO1
     dist1_km = _slant_range_km(sat_pos, geo1_pos)
     res1 = link_budget_relay(dist_leo_geo_km=dist1_km, dist_geo_gs_km=dist1_km, data_type=data_type)
     rate1 = res1.achievable_rate_mbps
-
-    # GEO1 → GEO2 (ISL)
-    rate2 = calculate_inter_satellite_rate(geo1_pos, geo2_pos)
 
     # GEO2 → 地面站
     dist3_km = _slant_range_km(geo2_pos, {
