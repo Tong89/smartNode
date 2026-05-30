@@ -65,6 +65,10 @@ register_error_handlers(app)
 # 注册可插拔 API Key 鉴权（未配置 SMARTNODE_API_KEY 时降级为开放模式）
 init_auth(app)
 
+# 注册 Prometheus /metrics 端点与 OTel 链路追踪（prometheus_client 缺失时降级）
+from backend.metrics import init_metrics  # noqa: E402
+init_metrics(app, simulation_engine)
+
 
 # CORS 来源白名单（逗号分隔，环境变量配置）；默认仅本机回环
 ALLOWED_ORIGINS = {

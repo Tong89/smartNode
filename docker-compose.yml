@@ -2,13 +2,19 @@
 # SmartNode — docker-compose.yml
 #
 # Usage:
-#   docker compose up              # foreground, rebuild if Dockerfile changed
-#   docker compose up -d           # detached
-#   docker compose up --build -d   # force rebuild then run detached
-#   docker compose down            # stop and remove containers
+#   docker compose up                          # foreground, rebuild if Dockerfile changed
+#   docker compose up -d                       # detached
+#   docker compose up --build -d               # force rebuild then run detached
+#   docker compose down                        # stop and remove containers
+#
+#   # Start with full monitoring stack (Prometheus + Grafana + OTel Collector):
+#   docker compose --profile monitoring up -d
 #
 # The service is available at http://localhost:5000/frontend/
 # Health endpoint:        http://localhost:5000/api/health
+# Metrics endpoint:       http://localhost:5000/metrics
+# Prometheus UI:          http://localhost:9090    (monitoring profile)
+# Grafana UI:             http://localhost:3000    (monitoring profile, admin/admin)
 # =============================================================================
 services:
   smartnode:
@@ -73,3 +79,64 @@ services:
     read_only: false
     tmpfs:
       - /tmp
+
+  # ---------------------------------------------------------------------------
+  # Monitoring profile — Prometheus + Grafana + OpenTelemetry Collector
+  # Start with: docker compose --profile monitoring up -d
+  # ---------------------------------------------------------------------------
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: smartnode-prometheus
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    depends_on:
+      - smartnode
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: smartnode-grafana
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana-provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.100.0
+    container_name: smartnode-otel-collector
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Collector metrics
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data: {}
+  grafana_data: {}
