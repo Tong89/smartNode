@@ -2,6 +2,9 @@
 
 > Space-Based Intelligent Relay Simulation Platform
 
+[![CI](https://github.com/Tong89/smartNode/actions/workflows/ci.yml/badge.svg)](https://github.com/Tong89/smartNode/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-60%25%20min-brightgreen)](https://github.com/Tong89/smartNode/actions/workflows/ci.yml)
+
 天基智枢 SmartNode 是一个面向天基数据回传场景的可视化仿真平台，用于展示卫星、地面站、中继链路和内容驱动任务调度之间的协同关系。
 
 ## 功能
@@ -89,6 +92,26 @@ run_server.bat
 python -m py_compile main.py backend/app.py backend/api.py backend/core.py
 node --check frontend/app.js
 ```
+
+## 测试与覆盖率
+
+安装开发依赖并运行测试套件（与 CI 保持一致）：
+
+```bash
+pip install -r requirements-dev.txt
+
+# 运行全部测试
+pytest
+
+# 运行测试并生成覆盖率报告（阈值 60%，低于则失败）
+pytest --cov=backend --cov-config=.coveragerc --cov-report=term-missing --cov-fail-under=60
+
+# 输出 HTML 报告（可用浏览器查看）
+pytest --cov=backend --cov-config=.coveragerc --cov-report=html
+open htmlcov/index.html
+```
+
+CI 工作流（`.github/workflows/ci.yml`）会在 Python 3.10、3.11、3.12 上并行执行上述步骤，并将 `coverage.xml` 作为工件上传，供后续分析使用。覆盖率低于门禁阈值时 CI 显式失败。
 
 ## 说明
 

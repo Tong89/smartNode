@@ -5,3 +5,10 @@
 pytest>=8.0,<9.0
 pytest-cov>=5.0,<6.0
 hypothesis>=6.100,<7.0
+
+# Code style / linting (kept in sync with quality.yml)
+ruff>=0.4,<1.0
+black>=24.0,<25.0
+
+# Static type checking
+mypy>=1.10,<2.0
