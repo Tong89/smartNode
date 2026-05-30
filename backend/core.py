@@ -9,7 +9,15 @@ import random
 import threading
 import os
 import sys
+import logging
 from datetime import datetime, timedelta
+
+from backend.config import (
+    HANDOVER_RATE_RATIO,
+    RESOURCE_TIGHT_THRESHOLD as CFG_RESOURCE_TIGHT_THRESHOLD,
+)
+
+logger = logging.getLogger("smartnode")
 
 # ==========================================
 # 0.5 Open API mode
@@ -665,7 +673,7 @@ for data_type, type_config in DATA_TYPES.items():
 
 # 记录组合数量
 TOTAL_DATA_COMBINATIONS = len(DATA_COMBINATIONS)
-print(f"[INFO] Generated {TOTAL_DATA_COMBINATIONS} data type combinations")
+logger.debug("Generated %d data type combinations", TOTAL_DATA_COMBINATIONS)
 
 # 仿真时间加速因子
 # 说明：TIME_SCALE决定仿真速度，值越大卫星移动越快
@@ -1503,7 +1511,7 @@ class SimulationEngine:
                                         new_rate = self._calculate_direct_rate(sat_pos, gs, req.data_type)
                                         
                                         # 切换阈值：新速率必须比当前快 20% 才切换，避免乒乓效应
-                                        if new_rate > req.transmission_rate * 1.2:
+                                        if new_rate > req.transmission_rate * HANDOVER_RATE_RATIO:
                                             self._log(f"🔄 触发链路切换: 中继 -> 地面站 ({gs['name']}) 速率提升: {req.transmission_rate:.0f}->{new_rate:.0f}", request=req, level="high")
                                             
                                             # 1. 释放旧的中继资源 (手动操作资源字典)
@@ -2028,7 +2036,7 @@ class SimulationEngine:
         force_relay = req.custom_constraints.get("force_relay", False)
         
         # 资源紧张阈值判断
-        RESOURCE_TIGHT_THRESHOLD = 0.95  # 平均利用率超过95%视为紧张（提高阈值，减少拒绝）
+        RESOURCE_TIGHT_THRESHOLD = CFG_RESOURCE_TIGHT_THRESHOLD  # 资源紧张阈值（见 config）
         if avg_utilization > RESOURCE_TIGHT_THRESHOLD:
             # 背景任务在资源紧张时更容易被拒绝
             if req.source == "background" and req.priority < 5:  # 只拒绝低优先级背景任务
