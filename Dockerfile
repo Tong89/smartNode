@@ -28,9 +28,13 @@ RUN python -m venv /opt/venv \
 # ------ Stage 2: runtime -----------------------------------------------
 FROM python:3.11-slim AS runtime
 
+# OCI image labels — static values are set here; dynamic labels
+# (version, revision, created) are injected by docker/metadata-action
+# in the CI publish workflow via --label flags at build time.
 LABEL org.opencontainers.image.title="SmartNode" \
       org.opencontainers.image.description="Space-Based Intelligent Relay Simulation Platform" \
-      org.opencontainers.image.source="https://github.com/Tong89/smartNode"
+      org.opencontainers.image.source="https://github.com/Tong89/smartNode" \
+      org.opencontainers.image.licenses="MIT"
 
 # Runtime system dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
