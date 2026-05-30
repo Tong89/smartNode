@@ -22,66 +22,82 @@
       />
 
       <aside class="inspector">
-        <RequestForm
-          :visible="uiStore.activeView === 'requests'"
-          v-model="requestForm"
-          :leo-satellites="simStore.leoSatellites"
-          :ground-stations="simStore.groundStations"
-          :data-type-options="simStore.dataTypeOptions"
-          :submitting="uiStore.submitting"
-          :notice="uiStore.notice"
-          :notice-type="uiStore.noticeType"
-          @submit="submitRequest"
-        />
+        <ErrorBoundary>
+          <RequestForm
+            :visible="uiStore.activeView === 'requests'"
+            v-model="requestForm"
+            :leo-satellites="simStore.leoSatellites"
+            :ground-stations="simStore.groundStations"
+            :data-type-options="simStore.dataTypeOptions"
+            :submitting="uiStore.submitting"
+            :notice="uiStore.notice"
+            :notice-type="uiStore.noticeType"
+            @submit="submitRequest"
+          />
+        </ErrorBoundary>
 
-        <ResourcePanel
-          :visible="uiStore.activeView === 'resources'"
-          v-model="resourceForm"
-          @refresh="simStore.refreshAll"
-          @update-ground-stations="updateGroundStations"
-          @update-leo-satellites="updateLeoSatellites"
-        />
+        <ErrorBoundary>
+          <ResourcePanel
+            :visible="uiStore.activeView === 'resources'"
+            v-model="resourceForm"
+            @refresh="simStore.refreshAll"
+            @update-ground-stations="updateGroundStations"
+            @update-leo-satellites="updateLeoSatellites"
+          />
+        </ErrorBoundary>
 
-        <ScenarioPanel
-          :visible="uiStore.activeView === 'scenario'"
-          @scenario-changed="simStore.refreshAll"
-        />
+        <ErrorBoundary>
+          <ScenarioPanel
+            :visible="uiStore.activeView === 'scenario'"
+            @scenario-changed="simStore.refreshAll"
+          />
+        </ErrorBoundary>
 
-        <GanttTimeline
-          :visible="uiStore.activeView === 'timeline'"
-          :timeline="simStore.resourceTimeline"
-          @refresh="simStore.refreshAll"
-        />
+        <ErrorBoundary>
+          <GanttTimeline
+            :visible="uiStore.activeView === 'timeline'"
+            :timeline="simStore.resourceTimeline"
+            @refresh="simStore.refreshAll"
+          />
+        </ErrorBoundary>
 
-        <StatsChartsPanel
-          :visible="uiStore.activeView === 'stats'"
-          :accepted-requests="Number(simStore.stats.accepted_requests) || 0"
-          :rejected-requests="Number(simStore.stats.rejected_requests) || 0"
-          :total-requests="Number(simStore.stats.total_requests) || 0"
-          :decision-metrics="simStore.decisionMetrics"
-          :rejection-distribution="simStore.rejectionDistribution"
-          :throughput-history="simStore.throughputHistory"
-          @refresh="simStore.refreshAll"
-        />
+        <ErrorBoundary>
+          <StatsChartsPanel
+            :visible="uiStore.activeView === 'stats'"
+            :accepted-requests="Number(simStore.stats.accepted_requests) || 0"
+            :rejected-requests="Number(simStore.stats.rejected_requests) || 0"
+            :total-requests="Number(simStore.stats.total_requests) || 0"
+            :decision-metrics="simStore.decisionMetrics"
+            :rejection-distribution="simStore.rejectionDistribution"
+            :throughput-history="simStore.throughputHistory"
+            @refresh="simStore.refreshAll"
+          />
+        </ErrorBoundary>
 
-        <TimePlayback
-          :visible="uiStore.activeView === 'playback'"
-          :has-data="!!simStore.resourceTimeline"
-          :playing="simStore.playback.playing.value"
-          :is-historical="simStore.playback.isHistorical.value"
-          :slider-fraction="simStore.playback.sliderFraction.value"
-          :cursor-label="simStore.playback.cursorLabel.value"
-          :end-label="playbackEndLabel"
-          :speed="simStore.playback.speed.value"
-          @toggle-play="simStore.playback.togglePlay"
-          @seek="simStore.playback.onSliderInput"
-          @set-speed="(s) => simStore.playback.setSpeed(s)"
-          @return-to-live="simStore.playback.returnToLive"
-        />
+        <ErrorBoundary>
+          <TimePlayback
+            :visible="uiStore.activeView === 'playback'"
+            :has-data="!!simStore.resourceTimeline"
+            :playing="simStore.playback.playing.value"
+            :is-historical="simStore.playback.isHistorical.value"
+            :slider-fraction="simStore.playback.sliderFraction.value"
+            :cursor-label="simStore.playback.cursorLabel.value"
+            :end-label="playbackEndLabel"
+            :speed="simStore.playback.speed.value"
+            @toggle-play="simStore.playback.togglePlay"
+            @seek="simStore.playback.onSliderInput"
+            @set-speed="(s) => simStore.playback.setSpeed(s)"
+            @return-to-live="simStore.playback.returnToLive"
+          />
+        </ErrorBoundary>
 
-        <UtilizationBars :rows="simStore.utilizationRows" />
+        <ErrorBoundary>
+          <UtilizationBars :rows="simStore.utilizationRows" />
+        </ErrorBoundary>
 
-        <RequestList :requests="simStore.recentRequests" />
+        <ErrorBoundary>
+          <RequestList :requests="simStore.recentRequests" />
+        </ErrorBoundary>
       </aside>
     </main>
   </div>
@@ -104,6 +120,8 @@ import ScenarioPanel from './components/ScenarioPanel.vue';
 import GanttTimeline from './components/GanttTimeline.vue';
 import StatsChartsPanel from './components/StatsChartsPanel.vue';
 import TimePlayback from './components/TimePlayback.vue';
+import ErrorBoundary from './components/error-boundary.vue';
+import { t } from './i18n';
 
 export default defineComponent({
   name: 'App',
@@ -120,6 +138,7 @@ export default defineComponent({
     GanttTimeline,
     StatsChartsPanel,
     TimePlayback,
+    ErrorBoundary,
   },
 
   setup() {
@@ -182,7 +201,7 @@ export default defineComponent({
     function saveApiBase() {
       const value = (apiBaseDraft.value || '').trim().replace(/\/$/, '');
       simStore.setApiBase(value);
-      uiStore.setNotice('API 地址已更新');
+      uiStore.setNotice(t('api.baseUpdated'));
     }
 
     async function submitRequest() {
@@ -203,16 +222,16 @@ export default defineComponent({
 
         if (result && result.status === 'rejected') {
           uiStore.setNotice(
-            `请求被拒绝：${result.reject_reason || '资源暂不可用'}`,
+            `${t('requestForm.rejected')}：${result.reject_reason || t('requestForm.unavailable')}`,
             'error',
           );
         } else {
-          uiStore.setNotice(`请求已提交：${result.id || '已进入队列'}`);
+          uiStore.setNotice(`${t('requestForm.submitted')}：${result.id || t('app.loading')}`);
         }
 
         await simStore.refreshAll();
       } catch (error) {
-        uiStore.setNotice((error as Error).message || '提交失败', 'error');
+        uiStore.setNotice((error as Error).message || t('requestForm.submitFailed'), 'error');
       } finally {
         uiStore.submitting = false;
       }
@@ -223,11 +242,11 @@ export default defineComponent({
         await simStore.sendUpdateGroundStations({
           count: Number(resourceForm.value.ground_station_count),
         });
-        uiStore.setNotice('地面站数量已更新');
+        uiStore.setNotice(`${t('resourcePanel.groundStations')} ${t('resourcePanel.updated')}`);
         uiStore.invalidateResourceForm();
         await simStore.refreshAll();
       } catch (error) {
-        uiStore.setNotice((error as Error).message || '资源更新失败', 'error');
+        uiStore.setNotice((error as Error).message || t('resourcePanel.updateFailed'), 'error');
       }
     }
 
@@ -236,11 +255,11 @@ export default defineComponent({
         await simStore.sendUpdateLeoSatellites({
           count: Number(resourceForm.value.leo_satellite_count),
         });
-        uiStore.setNotice('卫星数量已更新');
+        uiStore.setNotice(`${t('resourcePanel.leoSatellites')} ${t('resourcePanel.updated')}`);
         uiStore.invalidateResourceForm();
         await simStore.refreshAll();
       } catch (error) {
-        uiStore.setNotice((error as Error).message || '资源更新失败', 'error');
+        uiStore.setNotice((error as Error).message || t('resourcePanel.updateFailed'), 'error');
       }
     }
 
@@ -268,6 +287,7 @@ export default defineComponent({
       submitRequest,
       updateGroundStations,
       updateLeoSatellites,
+      t,
     };
   },
 });
