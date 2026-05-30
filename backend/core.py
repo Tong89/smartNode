@@ -1740,8 +1740,8 @@ class SimulationEngine:
                         satellite = sat
                         break
                 if not satellite:
-                    # 如果找不到指定的卫星，返回错误
-                    return None, f"未找到指定的卫星: {satellite_id}"
+                    # 如果找不到指定的卫星，返回结构化错误 dict（保持返回类型一致，避免 jsonify 误处理元组）
+                    return {"status": "error", "error": f"未找到指定的卫星: {satellite_id}"}
             else:
                 # 如果没有指定卫星，使用负载均衡选择
                 satellite_loads = {}
