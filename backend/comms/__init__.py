@@ -2,7 +2,8 @@
 """通信链路计算子包。
 
 提供链路预算（Link Budget）分析：EIRP、G/T、自由空间路径损耗、
-C/N0、Eb/N0、SNR 以及 QPSK/8PSK/16APSK 的 BER 与可达速率。
+C/N0、Eb/N0、SNR 以及 QPSK/8PSK/16APSK 的 BER 与可达速率；
+附带 ITU-R P.838/P.618/P.676 大气衰减（雨衰 + 气体吸收）模型。
 """
 from .link_budget import (
     LinkBudget,
@@ -16,6 +17,12 @@ from .link_budget import (
     link_budget_relay,
     link_budget_inter_satellite,
 )
+from .atmosphere import (
+    rain_attenuation_db,
+    gaseous_attenuation_db,
+    total_atmospheric_loss_db,
+    atmospheric_loss_for_link,
+)
 
 __all__ = [
     "LinkBudget",
@@ -28,4 +35,9 @@ __all__ = [
     "link_budget_direct",
     "link_budget_relay",
     "link_budget_inter_satellite",
+    # Atmospheric attenuation (ITU-R P.838/P.618/P.676)
+    "rain_attenuation_db",
+    "gaseous_attenuation_db",
+    "total_atmospheric_loss_db",
+    "atmospheric_loss_for_link",
 ]
