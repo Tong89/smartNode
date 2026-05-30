@@ -1,0 +1,92 @@
+name: docker-publish
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: tong89/smartnode
+
+jobs:
+  build-and-push:
+    name: Build & push multi-arch image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Set up QEMU for cross-architecture builds (arm64 needs emulation on amd64 runner)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      # Enable Docker Buildx (multi-platform + advanced caching support)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Authenticate to GHCR — skipped on pull_request events from forks (no write permission)
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derive image tags:
+      #   • main branch push  → ghcr.io/tong89/smartnode:latest + :sha-<short>
+      #   • version tag push  → ghcr.io/tong89/smartnode:<semver> + :latest + :sha-<short>
+      #   • pull request      → ghcr.io/tong89/smartnode:pr-<number>   (build-only, no push)
+      - name: Extract Docker metadata (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # semver tags on git tag events
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            # 'latest' on default branch push
+            type=raw,value=latest,enable={{is_default_branch}}
+            # short commit sha for traceability
+            type=sha,prefix=sha-,format=short
+            # PR identifier (used for build-only check without push)
+            type=ref,event=pr
+          labels: |
+            org.opencontainers.image.title=SmartNode
+            org.opencontainers.image.description=Space-Based Intelligent Relay Simulation Platform
+            org.opencontainers.image.vendor=Tong89
+            org.opencontainers.image.source=https://github.com/Tong89/smartNode
+
+      # Build the multi-arch image and push it only on non-PR events.
+      # Layer caching via registry cache (type=registry) re-uses unchanged layers
+      # across workflow runs, avoiding full rebuilds on incremental changes.
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          # Push only when NOT a pull_request event (PRs only do a build check)
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Registry-backed cache: warm cache speeds up subsequent builds significantly
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}:cache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
+          # Expose build provenance and SBOM attestations for supply-chain security
+          provenance: true
+          sbom: true
