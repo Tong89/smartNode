@@ -5,6 +5,7 @@
 便于统一调参与测试。数值与抽取前保持一致。
 """
 
+import json
 import os
 
 # 仿真时钟
@@ -45,6 +46,71 @@ def get_bind_port():
         return int(os.environ.get("SMARTNODE_PORT", "5000"))
     except ValueError:
         return 5000
+
+
+class LayeredSettings:
+    """分层配置：默认 < 文件(JSON) < 环境变量 < 运行时覆盖。
+
+    后加载的层覆盖先前层。环境变量键统一为 ``SMARTNODE_<UPPER_KEY>``。
+    """
+
+    DEFAULTS = {
+        "env": "development",
+        "host": "127.0.0.1",
+        "port": 5000,
+        "time_scale": TIME_SCALE,
+        "cors_origins": "http://localhost:5000,http://127.0.0.1:5000",
+        "debug_api": False,
+        "background_task_enabled": False,
+    }
+
+    def __init__(self, config_file=None):
+        self._values = dict(self.DEFAULTS)
+        if config_file:
+            self.load_file(config_file)
+        self.load_env()
+        self._runtime = {}
+
+    def load_file(self, path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                self._values.update(json.load(f) or {})
+        except (OSError, ValueError):
+            pass
+        return self
+
+    def load_env(self):
+        for key in self._values:
+            env_key = "SMARTNODE_" + key.upper()
+            if env_key in os.environ:
+                self._values[key] = _coerce(self._values[key], os.environ[env_key])
+        return self
+
+    def set(self, key, value):
+        """运行时覆盖（最高优先级）。"""
+        self._runtime[key] = value
+        return self
+
+    def get(self, key, default=None):
+        if key in self._runtime:
+            return self._runtime[key]
+        return self._values.get(key, default)
+
+    def as_dict(self):
+        merged = dict(self._values)
+        merged.update(self._runtime)
+        return merged
+
+
+def _coerce(template, raw):
+    if isinstance(template, bool):
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    if isinstance(template, int):
+        try:
+            return int(raw)
+        except ValueError:
+            return template
+    return raw
 
 
 def validate_config():

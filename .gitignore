@@ -37,3 +37,6 @@ Thumbs.db
 # 前端依赖与产物
 node_modules/
 frontend/dist/
+
+# 允许示例（不含真实密钥）
+!.env.example
