@@ -16,6 +16,12 @@ ignore = ["E501", "B008"]
 [tool.ruff.lint.isort]
 known-first-party = ["backend"]
 
+[tool.ruff.format]
+# Mirror black formatting settings so ruff format and black are compatible.
+line-ending = "lf"
+quote-style = "double"
+indent-style = "space"
+
 [tool.black]
 line-length = 120
 target-version = ["py310"]

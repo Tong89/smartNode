@@ -10,9 +10,75 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: lint / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install locked runtime dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install dev/lint tools from locked deps
+        run: pip install -r requirements-dev.txt
+
+      - name: Ruff — style & import checks
+        run: ruff check backend
+
+      - name: Black — formatting check (no modifications)
+        run: black --check backend
+
+      - name: py_compile — verify all backend modules parse cleanly
+        run: |
+          python -m py_compile backend/__init__.py
+          python -m py_compile backend/app.py
+          python -m py_compile backend/api.py
+          python -m py_compile backend/core.py
+          python -m py_compile backend/config.py
+          python -m py_compile backend/models.py
+          python -m py_compile backend/orbit.py
+          python -m py_compile backend/constellation.py
+          python -m py_compile backend/envelope.py
+          python -m py_compile backend/errors.py
+          python -m py_compile backend/schemas.py
+          python -m py_compile backend/scenario.py
+          python -m py_compile backend/auth.py
+          python -m py_compile backend/rbac.py
+          python -m py_compile backend/ratelimit.py
+          python -m py_compile backend/resources.py
+          python -m py_compile backend/openapi.py
+          echo "All backend modules compiled successfully."
+
+  frontend-syntax:
+    name: frontend / node --check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Verify frontend/app.js parses without syntax errors
+        run: node --check frontend/app.js
+
   test:
     name: pytest / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    needs: [lint]
     strategy:
       fail-fast: false
       matrix:
