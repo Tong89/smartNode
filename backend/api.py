@@ -660,7 +660,152 @@ def get_data_combinations():
 
 
 # ==========================================
-# 7. Static frontend and open metadata routes
+# 7. 场景保存 / 加载 / 导入导出 API
+# ==========================================
+from backend.scenario import ScenarioManager as _ScenarioManager  # noqa: E402
+
+# 内存中保存最近一次持久化的场景（进程重启后丢失；持久化到磁盘可由外部挂载卷实现）
+_saved_scene: dict | None = None
+
+
+@app.route('/api/scenario/save', methods=['POST'])
+@require_role('admin')
+@rate_limit(20, 60)
+def scenario_save():
+    """将当前仿真资源配置保存为场景对象并驻留内存。
+
+    可选 JSON 体：``{"name": "我的场景"}``
+    """
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name", ""))[:128]  # 防止超长名称
+    try:
+        scene = _ScenarioManager.save(simulation_engine, name=name)
+    except Exception:
+        logger.exception("场景保存失败")
+        return error_response("INTERNAL_ERROR")
+    global _saved_scene
+    _saved_scene = scene
+    return ok(scene)
+
+
+@app.route('/api/scenario/load', methods=['POST'])
+@require_role('admin')
+@rate_limit(10, 60)
+def scenario_load():
+    """将最近一次保存的内存场景恢复到仿真引擎。
+
+    引擎的地面站数量和 LEO 卫星数量将被调整为场景记录值。
+    """
+    if _saved_scene is None:
+        return error_response("NOT_FOUND", "尚未保存任何场景，请先调用 /api/scenario/save")
+    try:
+        result = _ScenarioManager.load(simulation_engine, _saved_scene)
+    except ValueError as ve:
+        return error_response("VALIDATION_ERROR", str(ve))
+    except Exception:
+        logger.exception("场景加载失败")
+        return error_response("INTERNAL_ERROR")
+    return ok(result)
+
+
+@app.route('/api/scenario/export', methods=['GET'])
+def scenario_export():
+    """导出最近一次保存的场景为 JSON 或 YAML 文件。
+
+    查询参数：``format=json``（默认）或 ``format=yaml``
+    """
+    if _saved_scene is None:
+        return error_response("NOT_FOUND", "尚未保存任何场景，请先调用 /api/scenario/save")
+    fmt = request.args.get("format", "json").lower().strip()
+    if fmt == "yaml":
+        try:
+            content = _ScenarioManager.to_yaml(_saved_scene)
+        except Exception:
+            logger.exception("YAML 导出失败")
+            return error_response("INTERNAL_ERROR")
+        return app.response_class(
+            response=content,
+            status=200,
+            mimetype="application/x-yaml",
+            headers={"Content-Disposition": 'attachment; filename="scenario.yaml"'},
+        )
+    # 默认 JSON
+    try:
+        content = _ScenarioManager.to_json(_saved_scene)
+    except Exception:
+        logger.exception("JSON 导出失败")
+        return error_response("INTERNAL_ERROR")
+    return app.response_class(
+        response=content,
+        status=200,
+        mimetype="application/json",
+        headers={"Content-Disposition": 'attachment; filename="scenario.json"'},
+    )
+
+
+@app.route('/api/scenario/import', methods=['POST'])
+@require_role('admin')
+@rate_limit(10, 60)
+def scenario_import():
+    """从上传的 JSON 或 YAML 文本导入场景并立即还原到引擎。
+
+    Content-Type: application/json  → JSON 解析
+    Content-Type: application/x-yaml 或其他  → YAML 解析
+    同时接受 multipart/form-data 中的 ``file`` 字段（前端文件上传）。
+    """
+    content_type = request.content_type or ""
+
+    # 支持 multipart 文件上传
+    if "multipart/form-data" in content_type:
+        file = request.files.get("file")
+        if file is None:
+            return error_response("VALIDATION_ERROR", "multipart 请求中未找到 'file' 字段")
+        raw_text = file.read(1 * 1024 * 1024).decode("utf-8", errors="replace")
+        # 根据文件名后缀决定解析器
+        filename = (file.filename or "").lower()
+        use_yaml = filename.endswith(".yaml") or filename.endswith(".yml")
+    else:
+        raw_bytes = request.get_data(limit=1 * 1024 * 1024)
+        raw_text = raw_bytes.decode("utf-8", errors="replace")
+        use_yaml = "yaml" in content_type
+
+    if not raw_text.strip():
+        return error_response("VALIDATION_ERROR", "请求体为空")
+
+    try:
+        if use_yaml:
+            scene_data = _ScenarioManager.from_yaml(raw_text)
+        else:
+            scene_data = _ScenarioManager.from_json(raw_text)
+    except ValueError as ve:
+        return error_response("VALIDATION_ERROR", f"场景解析失败: {ve}")
+
+    errors = _ScenarioManager.validate(scene_data)
+    if errors:
+        return error_response("VALIDATION_ERROR", "; ".join(errors))
+
+    try:
+        result = _ScenarioManager.load(simulation_engine, scene_data)
+    except ValueError as ve:
+        return error_response("VALIDATION_ERROR", str(ve))
+    except Exception:
+        logger.exception("场景导入并还原失败")
+        return error_response("INTERNAL_ERROR")
+
+    # 成功导入后同时更新内存中保存的场景
+    global _saved_scene
+    _saved_scene = scene_data
+    return ok(result)
+
+
+@app.route('/api/scenario/current', methods=['GET'])
+def scenario_current():
+    """返回当前内存中保存的场景（若有）；否则返回空。"""
+    return ok(_saved_scene)
+
+
+# ==========================================
+# 8. Static frontend and open metadata routes
 # ==========================================
 
 @app.route('/')
