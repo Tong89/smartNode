@@ -6,8 +6,17 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from backend.auth import init_auth
+from flask import g
+
+from backend.auth import (
+    authenticate_user,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    init_auth,
+)
 from backend.errors import error_response, register_error_handlers
+import jwt as _jwt
 
 from backend.core import (
     DATA_COMBINATIONS,
@@ -605,17 +614,60 @@ def frontend_assets(filename):
     return send_from_directory(FRONTEND_DIR, filename)
 
 
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """账号密码登录，签发 access/refresh JWT。"""
+    data = request.get_json(silent=True) or {}
+    role = authenticate_user(data.get('username'), data.get('password'))
+    if not role:
+        return error_response("UNAUTHORIZED", "用户名或密码错误")
+    sub = data.get('username')
+    return jsonify({
+        'token_type': 'Bearer',
+        'access_token': create_access_token(sub, role),
+        'refresh_token': create_refresh_token(sub, role),
+        'role': role,
+    })
+
+
+@app.route('/api/auth/refresh', methods=['POST'])
+def auth_refresh():
+    """用 refresh token 换取新的 access token。"""
+    data = request.get_json(silent=True) or {}
+    token = data.get('refresh_token')
+    try:
+        claims = decode_token(token) if token else None
+        if not claims or claims.get('type') != 'refresh':
+            raise ValueError("not a refresh token")
+    except (_jwt.PyJWTError, ValueError):
+        return error_response("UNAUTHORIZED", "刷新令牌无效或已过期")
+    return jsonify({
+        'token_type': 'Bearer',
+        'access_token': create_access_token(claims.get('sub'), claims.get('role', 'viewer')),
+    })
+
+
+# 角色 -> 权限映射（RBAC 由后续 PR 进一步细化与强制）
+_ROLE_PERMISSIONS = {
+    'admin': {'can_submit_request': True, 'can_modify_config': True},
+    'operator': {'can_submit_request': True, 'can_modify_config': False},
+    'viewer': {'can_submit_request': False, 'can_modify_config': False},
+}
+
+
 @app.route('/api/user_info')
 def get_user_info():
-    """Compatibility endpoint for clients that still expect user metadata."""
+    """返回当前令牌身份与角色对应的权限。"""
+    ident = getattr(g, 'identity', {}) or {}
+    role = ident.get('role', 'operator')
+    sub = ident.get('sub') or ('open-operator' if ident.get('auth') == 'open' else role)
+    perms = _ROLE_PERMISSIONS.get(role, _ROLE_PERMISSIONS['viewer'])
     return jsonify({
-        'username': 'open-operator',
-        'role': 'operator',
-        'display_name': '开放控制台',
-        'permissions': {
-            'can_submit_request': True,
-            'can_modify_config': True
-        }
+        'username': sub,
+        'role': role,
+        'display_name': sub,
+        'auth_mode': ident.get('auth', 'open'),
+        'permissions': perms,
     })
 
 
