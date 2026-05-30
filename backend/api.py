@@ -6,6 +6,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
+from backend.auth import init_auth
 from backend.errors import error_response, register_error_handlers
 
 from backend.core import (
@@ -33,6 +34,9 @@ app.config['JSON_AS_ASCII'] = False
 
 # 注册统一脱敏错误处理器（4xx/5xx 返回稳定错误码，不回传 traceback）
 register_error_handlers(app)
+
+# 注册可插拔 API Key 鉴权（未配置 SMARTNODE_API_KEY 时降级为开放模式）
+init_auth(app)
 
 
 @app.after_request
