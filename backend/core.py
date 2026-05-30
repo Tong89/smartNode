@@ -26,6 +26,7 @@ from backend import orbit
 from backend.orbit import OrbitalElements, calc_central_angle
 from backend.scheduling.handover import HandoverController
 from backend.resources import ResourceManager
+from backend.scheduling.scheduler import Scheduler
 
 logger = logging.getLogger("smartnode")
 
@@ -391,6 +392,8 @@ class SimulationEngine:
         self.handover = HandoverController(
             HANDOVER_RATE_RATIO, HANDOVER_MIN_DWELL, HANDOVER_COOLDOWN, HANDOVER_MIN_ELEVATION
         )
+        # 链路选路与重调度集中于 Scheduler
+        self.scheduler = Scheduler(self)
 
         # 背景任务生成器配置（降低频率以提高性能）
         self.background_task_enabled = False  # ⭐ 关闭背景任务，便于调试
@@ -1024,129 +1027,25 @@ class SimulationEngine:
         return orbit.check_geo_visibility(leo_pos, geo_pos)
     
     def _resource_busy_by_other(self, resource_type, resource_id, req_id):
-        return any(
-            existing_req_id != req_id
-            for existing_req_id in self.resource_usage.get(resource_type, {}).get(resource_id, [])
-        )
+        return self.scheduler.resource_busy_by_other(resource_type, resource_id, req_id)
 
     def _ground_station_candidates(self, req):
-        if req.selected_ground_stations:
-            selected = set(req.selected_ground_stations)
-            return [gs for gs in self.ground_stations if gs["id"] in selected]
-        return self.ground_stations
+        return self.scheduler.ground_station_candidates(req)
 
     def _relay_can_carry_request(self, relay_id, required_rate, req):
-        if relay_id in [req.selected_relay, req.selected_relay2]:
-            return True
-        return self._check_relay_bandwidth_available(relay_id, required_rate)
+        return self.scheduler.relay_can_carry_request(relay_id, required_rate, req)
 
     def _find_best_available_link(self, req, satellite, sat_pos):
-        data_config = DATA_TYPES.get(req.data_type, {})
-        allowed_links = data_config.get("allowed_links", ["direct"])
-        is_immediate_type = req.data_type in ["TASK_CMD", "INTEL"]
-        best_link = None
-        best_rate = 0
-
-        def can_use_satellite():
-            return is_immediate_type or not self._resource_busy_by_other("satellites", satellite.sat_id, req.id)
-
-        def can_use_ground_station(gs_id):
-            return is_immediate_type or not self._resource_busy_by_other("ground_stations", gs_id, req.id)
-
-        if "direct" in allowed_links and can_use_satellite():
-            for gs in self._ground_station_candidates(req):
-                if can_use_ground_station(gs["id"]) and self.check_visibility(sat_pos, gs, min_elevation=10):
-                    rate = self._calculate_direct_rate(sat_pos, gs, req.data_type)
-                    if rate > best_rate:
-                        best_rate = rate
-                        best_link = {
-                            "method": "direct",
-                            "ground_station": gs["id"],
-                            "relay": None,
-                            "relay2": None,
-                            "rate": rate
-                        }
-
-        if "relay" in allowed_links and can_use_satellite():
-            for geo in self.geo_relays:
-                geo_pos = self.get_geo_position(geo)
-                if not self.check_geo_visibility(sat_pos, geo_pos):
-                    continue
-                for gs in self._ground_station_candidates(req):
-                    if not can_use_ground_station(gs["id"]):
-                        continue
-                    if not self.check_visibility(geo_pos, gs, min_elevation=5):
-                        continue
-                    rate = self._calculate_relay_rate(sat_pos, geo_pos, gs, req.data_type)
-                    if rate > best_rate and self._relay_can_carry_request(geo["id"], rate, req):
-                        best_rate = rate
-                        best_link = {
-                            "method": "relay",
-                            "ground_station": gs["id"],
-                            "relay": geo["id"],
-                            "relay2": None,
-                            "rate": rate
-                        }
-
-        return best_link
+        return self.scheduler.find_best_available_link(req, satellite, sat_pos)
 
     def _current_link_available(self, req, sat_pos):
-        if req.transmission_method == "direct":
-            gs = next((item for item in self.ground_stations if item["id"] == req.selected_ground_station), None)
-            return bool(gs and self.check_visibility(sat_pos, gs, min_elevation=5))
-
-        if req.transmission_method == "relay":
-            geo = next((item for item in self.geo_relays if item["id"] == req.selected_relay), None)
-            gs = next((item for item in self.ground_stations if item["id"] == req.selected_ground_station), None)
-            if not geo or not gs:
-                return False
-            geo_pos = self.get_geo_position(geo)
-            return self.check_geo_visibility(sat_pos, geo_pos) and self.check_visibility(geo_pos, gs, min_elevation=5)
-
-        if req.transmission_method == "multi_relay":
-            geo1 = next((item for item in self.geo_relays if item["id"] == req.selected_relay), None)
-            geo2 = next((item for item in self.geo_relays if item["id"] == req.selected_relay2), None)
-            gs = next((item for item in self.ground_stations if item["id"] == req.selected_ground_station), None)
-            if not geo1 or not geo2 or not gs:
-                return False
-            geo1_pos = self.get_geo_position(geo1)
-            geo2_pos = self.get_geo_position(geo2)
-            geo_gap = calc_central_angle(geo1_pos["lat"], geo1_pos["lon"], geo2_pos["lat"], geo2_pos["lon"])
-            return (
-                self.check_geo_visibility(sat_pos, geo1_pos)
-                and geo_gap < 140
-                and self.check_visibility(geo2_pos, gs, min_elevation=5)
-            )
-
-        return False
+        return self.scheduler.current_link_available(req, sat_pos)
 
     def _apply_link_assignment(self, req, satellite, link):
-        self._release_resources(req.id)
-        req.transmission_method = link["method"]
-        req.selected_ground_station = link["ground_station"]
-        req.selected_relay = link["relay"]
-        req.selected_relay2 = link["relay2"]
-        req.transmission_rate = link["rate"]
-        self._occupy_resources(
-            req.id,
-            satellite.sat_id,
-            req.selected_ground_station,
-            req.selected_relay,
-            req.selected_relay2
-        )
+        self.scheduler.apply_link_assignment(req, satellite, link)
 
     def _reroute_transmission(self, req, satellite, sat_pos):
-        link = self._find_best_available_link(req, satellite, sat_pos)
-        if not link:
-            return False
-        old_method = req.transmission_method
-        self._apply_link_assignment(req, satellite, link)
-        self._log(
-            f"链路重调度: {old_method} -> {req.transmission_method}, 速率:{req.transmission_rate:.1f}Mbps",
-            request=req,
-            level="normal"
-        )
-        return True
+        return self.scheduler.reroute_transmission(req, satellite, sat_pos)
 
     def _interrupt_request(self, req, reason_code="LINK_INTERRUPTED"):
         req.status = "rejected"
