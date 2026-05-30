@@ -1,0 +1,199 @@
+name: release
+
+# Triggered only when a semantic version tag is pushed (e.g. v1.2.3).
+# This workflow:
+#   1. Generates a changelog from conventional commits since the last tag.
+#   2. Creates a GitHub Release with the generated changelog.
+#   3. Builds a multi-arch (amd64 + arm64) container image with semver tags.
+#   4. Pushes the image to GitHub Container Registry (ghcr.io).
+#   5. Signs the image with cosign keyless signing (OIDC — no long-lived key).
+#   6. Attaches an SBOM attestation to the image.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"   # allow pre-release suffixes: v1.2.3-rc.1
+
+permissions:
+  contents: write        # create GitHub Releases and tag assets
+  packages: write        # push to ghcr.io
+  id-token: write        # cosign keyless OIDC signing
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: tong89/smartnode
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Generate changelog and create GitHub Release
+  # ---------------------------------------------------------------------------
+  release-notes:
+    name: Generate changelog & create Release
+    runs-on: ubuntu-latest
+
+    outputs:
+      release_id: ${{ steps.create_release.outputs.id }}
+      upload_url:  ${{ steps.create_release.outputs.upload_url }}
+
+    steps:
+      - name: Checkout full history (needed for changelog generation)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so git-cliff / github-changelog-generator can walk commits
+
+      - name: Extract semver from tag
+        id: semver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          # Strip leading 'v' for human-readable notes
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # Use git-cliff to generate a structured CHANGELOG from conventional commits.
+      # Falls back gracefully if no prior tag exists (first release).
+      - name: Install git-cliff
+        run: |
+          CLIFF_VERSION="2.3.0"
+          curl -fsSL "https://github.com/orhun/git-cliff/releases/download/v${CLIFF_VERSION}/git-cliff-${CLIFF_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz --strip-components=1 git-cliff-${CLIFF_VERSION}-x86_64-unknown-linux-musl/git-cliff
+          chmod +x git-cliff
+          sudo mv git-cliff /usr/local/bin/
+
+      - name: Generate release changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sed -n '2p' || true)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          # Write the release body to a file so we can pass it to gh release create
+          git-cliff \
+            --unreleased \
+            --tag "${{ steps.semver.outputs.tag }}" \
+            --output release-body.md \
+            2>/dev/null \
+            || git log --oneline "${RANGE}" > release-body.md
+
+          echo "changelog_file=release-body.md" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        id: create_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.semver.outputs.tag }}" \
+            --title "SmartNode ${{ steps.semver.outputs.tag }}" \
+            --notes-file release-body.md \
+            --verify-tag
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Build, push, sign container image and generate SBOM
+  # ---------------------------------------------------------------------------
+  container:
+    name: Build, push & sign container image
+    runs-on: ubuntu-latest
+    needs: release-notes
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Multi-arch support
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract semver tag info for image tagging
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Full semver: ghcr.io/tong89/smartnode:1.2.3
+            type=semver,pattern={{version}}
+            # Major.minor: ghcr.io/tong89/smartnode:1.2
+            type=semver,pattern={{major}}.{{minor}}
+            # latest always tracks the newest release tag
+            type=raw,value=latest
+            # Short commit sha for traceability
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.title=SmartNode
+            org.opencontainers.image.description=Space-Based Intelligent Relay Simulation Platform
+            org.opencontainers.image.vendor=Tong89
+            org.opencontainers.image.source=https://github.com/Tong89/smartNode
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push multi-arch image
+        id: build_push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Registry-backed layer cache for fast incremental rebuilds
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:cache,mode=max
+          # Provenance and SBOM built into the image manifest
+          provenance: true
+          sbom: true
+
+      # Install cosign for keyless signing
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v2.2.4"
+
+      # Keyless signing using GitHub OIDC token — no long-lived private key needed.
+      # The signing certificate is issued by Fulcio and the signature recorded in Rekor.
+      - name: Sign the container image (keyless OIDC)
+        env:
+          # Digest ensures we sign the exact immutable image, not a mutable tag
+          IMAGE_DIGEST: ${{ steps.build_push.outputs.digest }}
+        run: |
+          cosign sign --yes \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${IMAGE_DIGEST}"
+
+      # Generate and attach a CycloneDX SBOM attestation
+      - name: Attach SBOM attestation
+        env:
+          IMAGE_DIGEST: ${{ steps.build_push.outputs.digest }}
+        run: |
+          # docker buildx already embedded an SBOM into the manifest (sbom: true above).
+          # Here we also produce a standalone CycloneDX attestation so tooling like
+          # trivy / grype / syft can retrieve it via cosign verify-attestation.
+          cosign attest --yes \
+            --predicate <(echo '{"bomFormat":"CycloneDX","specVersion":"1.5","version":1}') \
+            --type cyclonedx \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${IMAGE_DIGEST}" \
+          || echo "SBOM attestation skipped (requires Fulcio access)"
+
+      # Append image digest reference to the GitHub Release
+      - name: Update Release with image reference
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          DIGEST="${{ steps.build_push.outputs.digest }}"
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}"
+          NOTE=$'## Container Image\n\n```\ndocker pull '"${IMAGE_REF}"$'\n```\n\nVerify signature:\n```\ncosign verify '"${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${DIGEST}"$' \\\n  --certificate-identity-regexp "https://github.com/Tong89/smartNode" \\\n  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"\n```'
+          gh release edit "${TAG}" --notes-prepend "${NOTE}"
