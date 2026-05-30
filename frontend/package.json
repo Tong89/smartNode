@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
     "vue": "^3.4.0",
@@ -21,6 +22,8 @@
     "vite-plugin-cesium": "^1.2.22",
     "vitest": "^2.1.0",
     "@vue/test-utils": "^2.4.0",
-    "jsdom": "^25.0.0"
+    "jsdom": "^25.0.0",
+    "typescript": "^5.5.0",
+    "vue-tsc": "^2.1.0"
   }
 }
