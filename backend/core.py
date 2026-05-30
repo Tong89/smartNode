@@ -2051,7 +2051,7 @@ class SimulationEngine:
         if not force_relay and "direct" in data_config.get("allowed_links", ["direct"]):
             for gs in self.ground_stations:
                 # 检查地面站是否已被占用
-                gs_id = gs.get("id") if isinstance(gs, dict) else gs.station_id
+                gs_id = gs["id"]  # 地面站恒为 dict
                 if gs_id in self.resource_usage["ground_stations"] and len(self.resource_usage["ground_stations"][gs_id]) > 0:
                     continue
                 
@@ -2069,7 +2069,7 @@ class SimulationEngine:
             
             for geo in self.geo_relays:
                 # 检查GEO是否已被占用
-                geo_id = geo.get("id") if isinstance(geo, dict) else geo.geo_id
+                geo_id = geo["id"]  # 中继恒为 dict
                 if geo_id in self.resource_usage["geo_relays"] and len(self.resource_usage["geo_relays"][geo_id]) > 0:
                     continue
                 
@@ -2086,7 +2086,7 @@ class SimulationEngine:
                 # 检查GEO到地面站可见性
                 for gs in self.ground_stations:
                     # 检查地面站是否已被占用
-                    gs_id = gs.get("id") if isinstance(gs, dict) else gs.station_id
+                    gs_id = gs["id"]  # 地面站恒为 dict
                     if gs_id in self.resource_usage["ground_stations"] and len(self.resource_usage["ground_stations"][gs_id]) > 0:
                         continue
                     
