@@ -59,6 +59,16 @@ const app = Vue.createApp({
         ground_station_count: 0,
         leo_satellite_count: 0,
       },
+      // 多场景管理
+      scenarioList: [],
+      scenarioNewName: '',
+      scenarioSaving: false,
+      scenarioLoadingName: '',
+      // 场景对比
+      compareNameA: '',
+      compareNameB: '',
+      compareReport: null,
+      comparing: false,
     };
   },
 
@@ -136,6 +146,7 @@ const app = Vue.createApp({
     this.renderIcons();
     this.initCesium();
     this.refreshAll();
+    this.refreshScenarios();
     this.refreshTimer = window.setInterval(this.refreshAll, 2000);
     window.addEventListener('resize', this.resizeViewer);
   },
@@ -514,6 +525,123 @@ const app = Vue.createApp({
       this.noticeTimer = window.setTimeout(() => {
         this.notice = '';
       }, 4200);
+    },
+
+    // ── 多场景管理 ──────────────────────────────────────────────────
+    async refreshScenarios() {
+      try {
+        const items = await this.fetchJson('/api/scenarios');
+        this.scenarioList = Array.isArray(items) ? items : [];
+      } catch (e) {
+        this.setNotice('场景列表加载失败: ' + (e.message || e), 'error');
+      }
+    },
+
+    async saveNamedScenario() {
+      const name = (this.scenarioNewName || '').trim();
+      if (!name) {
+        this.setNotice('请输入场景名称', 'error');
+        return;
+      }
+      this.scenarioSaving = true;
+      try {
+        await this.fetchJson('/api/scenarios', {
+          method: 'POST',
+          body: JSON.stringify({ name }),
+        });
+        this.setNotice(`场景 "${name}" 已保存`);
+        this.scenarioNewName = '';
+        await this.refreshScenarios();
+      } catch (e) {
+        this.setNotice('场景保存失败: ' + (e.message || e), 'error');
+      } finally {
+        this.scenarioSaving = false;
+      }
+    },
+
+    async activateScenario(name) {
+      this.scenarioLoadingName = name;
+      try {
+        await this.fetchJson(`/api/scenarios/${encodeURIComponent(name)}/activate`, {
+          method: 'POST',
+        });
+        this.setNotice(`已切换到场景 "${name}"`);
+        this.resourceFormReady = false;
+        await this.refreshAll();
+      } catch (e) {
+        this.setNotice('场景切换失败: ' + (e.message || e), 'error');
+      } finally {
+        this.scenarioLoadingName = '';
+      }
+    },
+
+    async setBaseline(name) {
+      try {
+        await this.fetchJson(`/api/scenarios/${encodeURIComponent(name)}/baseline`, {
+          method: 'POST',
+        });
+        this.setNotice(`场景 "${name}" 已设为基线`);
+        await this.refreshScenarios();
+      } catch (e) {
+        this.setNotice('设置基线失败: ' + (e.message || e), 'error');
+      }
+    },
+
+    async deleteScenario(name) {
+      if (!window.confirm(`确认删除场景 "${name}"？`)) return;
+      try {
+        await this.fetchJson(`/api/scenarios/${encodeURIComponent(name)}`, {
+          method: 'DELETE',
+        });
+        this.setNotice(`场景 "${name}" 已删除`);
+        // 清理对比选择
+        if (this.compareNameA === name) this.compareNameA = '';
+        if (this.compareNameB === name) this.compareNameB = '';
+        await this.refreshScenarios();
+      } catch (e) {
+        this.setNotice('删除失败: ' + (e.message || e), 'error');
+      }
+    },
+
+    async runCompare() {
+      const a = (this.compareNameA || '').trim();
+      const b = (this.compareNameB || '').trim();
+      if (!a || !b) {
+        this.setNotice('请先选择两个场景再对比', 'error');
+        return;
+      }
+      if (a === b) {
+        this.setNotice('请选择不同的两个场景', 'error');
+        return;
+      }
+      this.comparing = true;
+      this.compareReport = null;
+      try {
+        const report = await this.fetchJson(
+          `/api/scenario/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+        );
+        this.compareReport = report;
+      } catch (e) {
+        this.setNotice('对比失败: ' + (e.message || e), 'error');
+      } finally {
+        this.comparing = false;
+      }
+    },
+
+    compareMetricClass(delta) {
+      if (delta === null || delta === undefined) return '';
+      if (delta > 0) return 'metric-up';
+      if (delta < 0) return 'metric-down';
+      return '';
+    },
+
+    formatMetricValue(value) {
+      if (value === null || value === undefined) return '-';
+      const n = Number(value);
+      if (isNaN(n)) return '-';
+      // 小值（0-1 区间）显示百分比，大值保留两位小数
+      if (Math.abs(n) <= 1 && n !== 0) return (n * 100).toFixed(1) + '%';
+      return n.toFixed(2);
     },
 
     labelDataType(type) {
