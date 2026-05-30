@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 """轨道与几何计算（无状态纯函数 + 轨道根数模型）。
 
-从 core.py 抽离：calc_central_angle、OrbitalElements（二体传播）、可见性与各类链路速率计算。
-本模块不依赖引擎实例，可独立导入与单测；引擎通过导入复用，数值与抽离前一致。
+从 core.py 抽离：calc_central_angle、OrbitalElements（二体传播 + 可选 SGP4/TLE）、
+可见性与各类链路速率计算。本模块不依赖引擎实例，可独立导入与单测；引擎通过导入复用，
+数值与抽离前一致。
+
+TLE 集成
+---------
+``OrbitalElements`` 新增可选 ``tle_line1`` / ``tle_line2`` 字段。当这两个字段
+非空且 ``sgp4`` 已安装时，``propagate()`` 自动走 SGP4 高精度路径；否则继续使用
+现有开普勒二体解析解。对调用者接口（返回 ``(lat, lon, alt)``）无影响。
 """
 import math
 from datetime import datetime
@@ -22,11 +29,24 @@ def calc_central_angle(lat1, lon1, lat2, lon2):
 
 
 class OrbitalElements:
-    """轨道六根数定义 - 用于精确计算卫星位置"""
+    """轨道六根数定义 - 用于精确计算卫星位置。
+
+    支持可选的 TLE 两行根数驱动 SGP4 传播。当 ``tle_line1`` / ``tle_line2`` 字段
+    非空时，``propagate()`` 使用 :func:`~backend.physics.propagator.propagate_tle`；
+    否则回退现有开普勒二体解析解，行为与重构前完全一致。
+
+    参数
+    ----
+    tle_line1 : str, optional
+        TLE 第一行（74 字符 NORAD 格式）。
+    tle_line2 : str, optional
+        TLE 第二行（74 字符 NORAD 格式）。
+    """
 
     def __init__(self, name, sat_id,
                  semi_major_axis, eccentricity, inclination,
-                 raan, arg_perigee, mean_anomaly, epoch=None):
+                 raan, arg_perigee, mean_anomaly, epoch=None,
+                 tle_line1=None, tle_line2=None):
         self.name = name
         self.sat_id = sat_id
         self.a = semi_major_axis
@@ -38,6 +58,18 @@ class OrbitalElements:
         self.epoch = epoch or datetime.now()
         self.mu = 398600.4418   # 地球引力常数 (km³/s²)
         self.R_earth = 6371.0   # 地球半径 (km)
+        # 可选 TLE 字段（非空时启用 SGP4 传播）
+        self.tle_line1 = tle_line1
+        self.tle_line2 = tle_line2
+        # 延迟初始化 Propagator（避免循环导入问题）
+        self._propagator = None
+
+    def _get_propagator(self):
+        """惰性构建并缓存 Propagator 实例。"""
+        if self._propagator is None:
+            from backend.physics.propagator import Propagator  # pylint: disable=import-outside-toplevel
+            self._propagator = Propagator.from_orbital_elements(self)
+        return self._propagator
 
     def get_mean_motion(self):
         return math.sqrt(self.mu / (self.a ** 3))
@@ -49,7 +81,20 @@ class OrbitalElements:
         return (self.a - self.R_earth) * 1000
 
     def propagate(self, current_time):
-        """根据当前时间计算卫星位置 (二体)，返回 (lat°, lon°, alt m)。"""
+        """根据当前时间计算卫星位置，返回 (lat°, lon°, alt m)。
+
+        若设置了有效 TLE 且 sgp4 可用，使用 SGP4 传播；否则回退二体开普勒解析解。
+        """
+        # 若存在 TLE 且 SGP4 可用，委托给统一传播器
+        if self.tle_line1 and self.tle_line2:
+            prop = self._get_propagator()
+            if prop.uses_sgp4:
+                return prop.propagate(current_time)
+            # sgp4 库未安装或 TLE 解析失败，回退二体（避免无限递归）
+        return self._propagate_kepler(current_time)
+
+    def _propagate_kepler(self, current_time):
+        """开普勒二体解析传播，返回 (lat°, lon°, alt m)。"""
         if isinstance(current_time, datetime):
             dt_seconds = (current_time - self.epoch).total_seconds()
         else:
@@ -91,6 +136,68 @@ class OrbitalElements:
         x_ecef, y_ecef, z_ecef = eci_to_ecef(x, y, z, theta)
         lat, lon, alt = ecef_to_lla(x_ecef, y_ecef, z_ecef)
         return lat, lon, alt
+
+    @classmethod
+    def from_tle(cls, name: str, sat_id: str,
+                 tle_line1: str, tle_line2: str,
+                 epoch=None) -> "OrbitalElements":
+        """由 TLE 两行根数构造 OrbitalElements，轨道根数从 TLE 解析填充。
+
+        SGP4 传播时直接使用 TLE 数据；轨道根数字段仅用于回退和元数据。
+
+        参数
+        ----
+        name : str
+            卫星名称。
+        sat_id : str
+            系统内部卫星 ID。
+        tle_line1 : str
+            TLE 第一行。
+        tle_line2 : str
+            TLE 第二行。
+        epoch : datetime, optional
+            TLE 历元（None 则从 TLE 解析，回退 datetime.now()）。
+
+        返回
+        ----
+        OrbitalElements
+            带有 TLE 字段的实例，propagate() 将走 SGP4 路径。
+        """
+        # 从 TLE 第二行解析轨道根数（用于回退/元数据）
+        try:
+            fields = tle_line2.split()
+            inclination = float(fields[2])
+            raan = float(fields[3])
+            eccentricity = float("0." + fields[4])
+            arg_perigee = float(fields[5])
+            mean_anomaly = float(fields[6])
+            mean_motion_rev_day = float(fields[7][:11])
+            # 由平运动推算半长轴 (km)
+            mu = 398600.4418
+            n_rad_s = mean_motion_rev_day * 2.0 * math.pi / 86400.0
+            semi_major_axis = (mu / (n_rad_s ** 2)) ** (1.0 / 3.0)
+        except (IndexError, ValueError):
+            # TLE 解析失败时使用保守默认值（SGP4 仍可正常运行）
+            inclination = 0.0
+            raan = 0.0
+            eccentricity = 0.0
+            arg_perigee = 0.0
+            mean_anomaly = 0.0
+            semi_major_axis = 7000.0  # ~629 km LEO
+
+        return cls(
+            name=name,
+            sat_id=sat_id,
+            semi_major_axis=semi_major_axis,
+            eccentricity=eccentricity,
+            inclination=inclination,
+            raan=raan,
+            arg_perigee=arg_perigee,
+            mean_anomaly=mean_anomaly,
+            epoch=epoch,
+            tle_line1=tle_line1,
+            tle_line2=tle_line2,
+        )
 
 
 def check_visibility(sat_pos, gs_pos, min_elevation=10):
