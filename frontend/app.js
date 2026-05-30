@@ -40,6 +40,10 @@ const app = Vue.createApp({
       // Cesium 增量更新：实体索引表，避免每次 removeAll 重建场景
       _entityIndex: {},      // id -> Cesium.Entity，管理节点（卫星、地面站、中继）
       _linkIndex: {},        // linkKey -> Cesium.Entity，管理链路 polyline
+      // 链路动画状态：流动动画偏移量与 rAF 句柄
+      _linkAnimOffset: 0,    // 当前动画时间偏移（0–1 循环，用于 dashPattern 驱动流动效果）
+      _linkAnimFrame: null,  // requestAnimationFrame 句柄，非 null 时表示动画循环运行
+      _linkAnimRateMap: {},  // linkKey -> { rate, method }，缓存链路传输速率与方式
       // 轨道轨迹索引：satId -> { orbitEntity, groundEntity }
       _trackIndex: {},
       _tracksLoading: false,
@@ -258,6 +262,11 @@ const app = Vue.createApp({
       window.clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+    // 取消链路动画循环
+    if (this._linkAnimFrame !== null) {
+      cancelAnimationFrame(this._linkAnimFrame);
+      this._linkAnimFrame = null;
+    }
     window.removeEventListener('resize', this.resizeViewer);
     if (this.viewer && !this.viewer.isDestroyed()) {
       this.viewer.destroy();
@@ -267,6 +276,7 @@ const app = Vue.createApp({
     this._linkIndex = {};
     this._trackIndex = {};
     this._coverageIndex = {};
+    this._linkAnimRateMap = {};
   },
 
   methods: {
@@ -674,7 +684,7 @@ const app = Vue.createApp({
         .forEach((req) => {
           const satellite = satMap.get(req.satellite_id);
           if (!satellite) return;
-          this.updateRequestLinks(req, satellite, geoMap, gsMap, linkColor, liveLinkKeys);
+          this.updateRequestLinks(req, satellite, geoMap, gsMap, liveLinkKeys);
         });
 
       // 移除已消失的链路实体
@@ -682,7 +692,15 @@ const app = Vue.createApp({
         if (!liveLinkKeys.has(lkey)) {
           this.viewer.entities.remove(this._linkIndex[lkey]);
           delete this._linkIndex[lkey];
+          delete this._linkAnimRateMap[lkey];
         }
+      }
+
+      // 启动链路流动动画循环（若尚未运行）
+      if (liveLinkKeys.size > 0) {
+        this._startLinkAnimation();
+      } else {
+        this._stopLinkAnimation();
       }
 
       // ── 覆盖足迹与可见性圈 ────────────────────────────────────────
@@ -697,8 +715,9 @@ const app = Vue.createApp({
     /**
      * 为单条请求按需增量更新/创建链路 polyline 实体。
      * liveLinkKeys 用于记录本轮活跃的链路 key，以便事后清理。
+     * 链路颜色由 transmission_method 决定，线宽由 transmission_rate 归一化映射。
      */
-    updateRequestLinks(req, satellite, geoMap, gsMap, color, liveLinkKeys) {
+    updateRequestLinks(req, satellite, geoMap, gsMap, liveLinkKeys) {
       const groundStation = req.selected_ground_station
         ? gsMap.get(req.selected_ground_station)
         : null;
@@ -709,51 +728,178 @@ const app = Vue.createApp({
         ? geoMap.get(req.selected_relay2)
         : null;
 
+      const rate = Number(req.transmission_rate || 0);
+      const method = req.transmission_method || 'direct';
+
       if (firstRelay && secondRelay) {
-        this.upsertLink(`${req.id}:sat-relay1`, satellite, firstRelay, color, liveLinkKeys);
-        this.upsertLink(`${req.id}:relay1-relay2`, firstRelay, secondRelay, color, liveLinkKeys);
+        this.upsertLink(`${req.id}:sat-relay1`, satellite, firstRelay, rate, method, liveLinkKeys);
+        this.upsertLink(`${req.id}:relay1-relay2`, firstRelay, secondRelay, rate, method, liveLinkKeys);
         if (groundStation) {
-          this.upsertLink(`${req.id}:relay2-gs`, secondRelay, groundStation, color, liveLinkKeys);
+          this.upsertLink(`${req.id}:relay2-gs`, secondRelay, groundStation, rate, method, liveLinkKeys);
         }
         return;
       }
 
       if (firstRelay) {
-        this.upsertLink(`${req.id}:sat-relay1`, satellite, firstRelay, color, liveLinkKeys);
+        this.upsertLink(`${req.id}:sat-relay1`, satellite, firstRelay, rate, method, liveLinkKeys);
         if (groundStation) {
-          this.upsertLink(`${req.id}:relay1-gs`, firstRelay, groundStation, color, liveLinkKeys);
+          this.upsertLink(`${req.id}:relay1-gs`, firstRelay, groundStation, rate, method, liveLinkKeys);
         }
         return;
       }
 
-      if (groundStation && req.transmission_method === 'direct') {
-        this.upsertLink(`${req.id}:sat-gs`, satellite, groundStation, color, liveLinkKeys);
+      if (groundStation && method === 'direct') {
+        this.upsertLink(`${req.id}:sat-gs`, satellite, groundStation, rate, method, liveLinkKeys);
+      }
+    },
+
+    /**
+     * 将传输速率（Mbps）归一化为链路线宽（1.5–6px）。
+     * 使用对数映射，使低速率链路也有明显变化。
+     * @param {number} rateMbps - 传输速率（Mbps）
+     * @returns {number} 线宽（px）
+     */
+    _rateToLineWidth(rateMbps) {
+      const MIN_W = 1.5;
+      const MAX_W = 6.0;
+      const MAX_RATE = 1000; // 参考最大速率 1000 Mbps
+      if (!rateMbps || rateMbps <= 0) return MIN_W;
+      // 对数归一化：log(1 + rate) / log(1 + MAX_RATE)
+      const norm = Math.log1p(Math.min(rateMbps, MAX_RATE)) / Math.log1p(MAX_RATE);
+      return MIN_W + norm * (MAX_W - MIN_W);
+    },
+
+    /**
+     * 根据传输方式返回对应的链路颜色（Cesium.Color）。
+     * - direct（直连）：金黄色
+     * - relay（单中继）：青绿色
+     * - multi_relay（多跳）：紫色
+     * @param {string} method - 传输方式
+     * @returns {Cesium.Color}
+     */
+    _methodToLinkColor(method) {
+      if (!window.Cesium) return null;
+      switch (method) {
+        case 'relay':       return Cesium.Color.fromCssColorString('#3dcfc4'); // 青绿
+        case 'multi_relay': return Cesium.Color.fromCssColorString('#b67cf6'); // 紫色
+        default:            return Cesium.Color.fromCssColorString('#f0c76b'); // 金黄（直连）
       }
     },
 
     /**
      * 按 linkKey 复用已有的 polyline 实体；不存在时新建并注册到 _linkIndex。
-     * 复用时更新两端点坐标，保持实体引用稳定。
+     * 复用时更新两端点坐标与动画速率缓存，保持实体引用稳定。
+     * 使用 PolylineGlowMaterialProperty 表现数据流向，线宽随传输速率变化。
+     * @param {string} linkKey - 链路唯一键
+     * @param {object} from - 起始节点 { lon, lat, alt }
+     * @param {object} to - 终止节点 { lon, lat, alt }
+     * @param {number} rateMbps - 传输速率（Mbps），用于映射线宽
+     * @param {string} method - 传输方式（direct/relay/multi_relay），用于确定颜色
+     * @param {Set<string>} liveLinkKeys - 本轮活跃链路集合
      */
-    upsertLink(linkKey, from, to, color, liveLinkKeys) {
+    upsertLink(linkKey, from, to, rateMbps, method, liveLinkKeys) {
       liveLinkKeys.add(linkKey);
       const positions = [
         this.toCartesian(from.lon, from.lat, from.alt || 0),
         this.toCartesian(to.lon, to.lat, to.alt || 0),
       ];
+      const width = this._rateToLineWidth(rateMbps);
+      const baseColor = this._methodToLinkColor(method || 'direct');
+
+      // 缓存当前链路速率与方式，供动画循环使用
+      this._linkAnimRateMap[linkKey] = { rate: rateMbps, method: method || 'direct' };
 
       if (this._linkIndex[linkKey]) {
-        // 更新两端点位置
-        this._linkIndex[linkKey].polyline.positions = positions;
+        // 更新两端点位置与线宽
+        const poly = this._linkIndex[linkKey].polyline;
+        poly.positions = positions;
+        poly.width = width;
+        // 更新发光材质颜色（速率/方式可能在刷新中变化）
+        if (poly.material && poly.material instanceof Cesium.PolylineGlowMaterialProperty) {
+          poly.material = new Cesium.PolylineGlowMaterialProperty({
+            glowPower: 0.25,
+            taperPower: 0.9,
+            color: baseColor.withAlpha(0.85),
+          });
+        }
       } else {
         const entity = this.viewer.entities.add({
           polyline: {
             positions,
-            width: 2.5,
-            material: color,
+            width,
+            material: new Cesium.PolylineGlowMaterialProperty({
+              glowPower: 0.25,
+              taperPower: 0.9,
+              color: baseColor.withAlpha(0.85),
+            }),
+            arcType: Cesium.ArcType.NONE,
           },
         });
         this._linkIndex[linkKey] = entity;
+      }
+    },
+
+    /**
+     * 启动链路流动动画循环。
+     * 通过持续调用 requestRender 驱动 Cesium 在 requestRenderMode 下不断重绘，
+     * 同时利用 PolylineGlowMaterialProperty 的自发光效果模拟数据流动感。
+     * 每帧递增 _linkAnimOffset 并对有速率信息的链路微调发光强度，产生脉冲效果。
+     */
+    _startLinkAnimation() {
+      if (this._linkAnimFrame !== null) return; // 已在运行
+      if (!this.viewer || !this.cesiumReady) return;
+
+      let lastTime = performance.now();
+      const tick = (now) => {
+        const dt = Math.min((now - lastTime) / 1000, 0.1); // 单帧增量（秒），上限 100ms
+        lastTime = now;
+
+        // 更新全局动画偏移（0–1 循环）
+        this._linkAnimOffset = (this._linkAnimOffset + dt * 0.5) % 1;
+
+        // 对每条活跃链路：按速率调整发光强度，营造脉冲流动感
+        if (window.Cesium) {
+          const t = this._linkAnimOffset;
+          for (const [lkey, info] of Object.entries(this._linkAnimRateMap)) {
+            const entity = this._linkIndex[lkey];
+            if (!entity || !entity.polyline) continue;
+            // 速率越高脉冲越快；基础脉冲频率 1Hz，速率比例最高 3x
+            const freq = 1 + Math.min(2, (info.rate || 0) / 200);
+            const phase = (t * freq) % 1;
+            // 发光强度在 0.15–0.55 间脉冲
+            const glow = 0.15 + 0.40 * Math.abs(Math.sin(phase * Math.PI));
+            const baseColor = this._methodToLinkColor(info.method);
+            entity.polyline.material = new Cesium.PolylineGlowMaterialProperty({
+              glowPower: glow,
+              taperPower: 0.9,
+              color: baseColor.withAlpha(0.85),
+            });
+          }
+        }
+
+        // 在 requestRenderMode 下触发重绘
+        if (this.viewer && !this.viewer.isDestroyed()) {
+          this.viewer.scene.requestRender();
+        }
+
+        // 若仍有活跃链路则继续循环
+        if (Object.keys(this._linkAnimRateMap).length > 0) {
+          this._linkAnimFrame = requestAnimationFrame(tick);
+        } else {
+          this._linkAnimFrame = null;
+        }
+      };
+
+      this._linkAnimFrame = requestAnimationFrame(tick);
+    },
+
+    /**
+     * 停止链路流动动画循环（当无活跃传输链路时调用）。
+     */
+    _stopLinkAnimation() {
+      if (this._linkAnimFrame !== null) {
+        cancelAnimationFrame(this._linkAnimFrame);
+        this._linkAnimFrame = null;
       }
     },
 
@@ -790,9 +936,9 @@ const app = Vue.createApp({
     /**
      * @deprecated 由 updateRequestLinks 取代。
      */
-    drawRequestLinks(req, satellite, geoMap, gsMap, color) {
+    drawRequestLinks(req, satellite, geoMap, gsMap) {
       const liveLinkKeys = new Set();
-      this.updateRequestLinks(req, satellite, geoMap, gsMap, color, liveLinkKeys);
+      this.updateRequestLinks(req, satellite, geoMap, gsMap, liveLinkKeys);
     },
 
     /**
