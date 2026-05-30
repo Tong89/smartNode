@@ -36,4 +36,18 @@ files = ["backend"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --tb=short"
+# 只排除基准测试（避免 CI 在普通 pytest 运行时触发）
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests requiring a running engine",
+]
+
+[tool.coverage.run]
+source = ["backend"]
+omit = ["backend/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 30
