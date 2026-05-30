@@ -1,0 +1,64 @@
+{
+  "_comment": "黄金场景快照 — 由 tests/fixtures/scenarios.py 生成，seed=42，用于 test_regression_golden.py 逐字段回归断言。",
+  "_generated_by": "tests/test_regression_golden.py::generate (python -m pytest tests/test_regression_golden.py --update-golden)",
+  "_seed": 42,
+  "_ground_station_count": 5,
+  "_leo_satellite_count": 4,
+  "task_cmd_immediate": {
+    "_doc": "场景1: TASK_CMD 立即接受 — immediate=True 类型无需等待链路，直接进入 transmitting",
+    "request": {
+      "data_type": "TASK_CMD",
+      "status": "transmitting",
+      "reject_reason": null,
+      "source": "user"
+    },
+    "stats": {
+      "total_requests": 1,
+      "accepted_requests": 1,
+      "rejected_requests": 0
+    }
+  },
+  "raw_image_direct": {
+    "_doc": "场景2: RAW_IMAGE 仅直连 — allowed_links=[direct]，transmission_method 必须为 direct",
+    "request": {
+      "data_type": "RAW_IMAGE",
+      "status": "transmitting",
+      "reject_reason": null,
+      "transmission_method": "direct",
+      "source": "user"
+    },
+    "stats": {
+      "total_requests": 1,
+      "accepted_requests": 1,
+      "rejected_requests": 0
+    }
+  },
+  "relay_bandwidth_exhausted": {
+    "_doc": "场景3: 中继带宽耗尽 — 所有 GEO 中继带宽已满且地面站被占用，DATA_SLICE 被立即拒绝",
+    "request": {
+      "data_type": "DATA_SLICE",
+      "status": "rejected",
+      "reject_reason": "无可用通信链路或资源不足",
+      "source": "user"
+    },
+    "stats": {
+      "total_requests": 1,
+      "accepted_requests": 0,
+      "rejected_requests": 1
+    }
+  },
+  "wait_timeout": {
+    "_doc": "场景4: 等待超时 — RAW_IMAGE 被接受等待过境，但在 max_delay 内无法开始传输，触发 TIMEOUT_WAIT",
+    "request": {
+      "data_type": "RAW_IMAGE",
+      "status": "rejected",
+      "reject_reason": "等待超时（超过30分钟未开始传输，请重新提交）",
+      "source": "user"
+    },
+    "stats": {
+      "total_requests": 1,
+      "accepted_requests": 0,
+      "rejected_requests": 1
+    }
+  }
+}
