@@ -21,6 +21,11 @@ from backend.physics.propagator import (
     j2_mean_anomaly_rate_correction,
 )
 from backend.physics.geometry import check_visibility_enu, check_geo_visibility_enu
+from backend.comms.link_budget import (
+    link_budget_direct,
+    link_budget_relay,
+    link_budget_inter_satellite,
+)
 
 
 def calc_central_angle(lat1, lon1, lat2, lon2):
@@ -257,49 +262,118 @@ def check_geo_visibility(leo_pos, geo_pos):
     return check_geo_visibility_enu(leo_pos, geo_pos)
 
 
+def _slant_range_km(sat_pos, target_pos) -> float:
+    """计算卫星到目标点斜距 (km)，用于链路预算。
+
+    使用球面几何近似：
+        d = √((alt_sat - alt_tgt)² + (R_E·sin(angle))²)
+
+    Parameters
+    ----------
+    sat_pos : dict
+        卫星位置，含 lat/lon/alt (alt 单位 m)。
+    target_pos : dict
+        目标位置，含 lat/lon/alt (alt 单位 m)。
+
+    Returns
+    -------
+    float
+        斜距 (km)。
+    """
+    R_E = 6371.0  # km
+    angle = calc_central_angle(
+        sat_pos["lat"], sat_pos["lon"],
+        target_pos["lat"], target_pos["lon"],
+    )
+    alt_sat_km = sat_pos["alt"] / 1000.0
+    alt_tgt_km = target_pos.get("alt", 0.0) / 1000.0
+    dist = math.sqrt(
+        (alt_sat_km - alt_tgt_km) ** 2
+        + (R_E * math.sin(math.radians(angle))) ** 2
+    )
+    return max(dist, 1.0)  # 最小 1 km，防止除零
+
+
 def calculate_direct_rate(sat_pos, gs, data_type=None):
-    """直连链路速率 (Mbps)。"""
-    angle = calc_central_angle(sat_pos["lat"], sat_pos["lon"], gs["lat"], gs["lon"])
-    distance = math.sqrt((sat_pos["alt"] / 1000) ** 2 + (6371 * math.sin(math.radians(angle))) ** 2)
-    base_rate = 200 if gs["antenna_type"] == "Ka" else 100
-    rate = base_rate * math.exp(-distance / 10000)
-    if data_type == "RAW_IMAGE":
-        rate = rate * 0.6
-    return max(rate, 5)
+    """直连���路速率 (Mbps)，由链路预算引擎驱动。
+
+    替代原 base_rate × exp(-d/k) 经验公式，
+    使用 FSPL/EIRP/G-T/C-N0 推导物理上准确的可达速率。
+    """
+    dist_km = _slant_range_km(sat_pos, {
+        "lat": gs["lat"],
+        "lon": gs["lon"],
+        "alt": 0.0,
+    })
+    antenna_type = gs.get("antenna_type", "Ka")
+    result = link_budget_direct(
+        distance_km=dist_km,
+        antenna_type=antenna_type,
+        data_type=data_type,
+    )
+    return max(result.achievable_rate_mbps, 5.0)
 
 
 def calculate_relay_rate(sat_pos, geo_pos, gs, data_type=None):
-    """单跳中继链路速率 (Mbps)。"""
-    angle1 = calc_central_angle(sat_pos["lat"], sat_pos["lon"], geo_pos["lat"], geo_pos["lon"])
-    dist1 = math.sqrt((geo_pos["alt"] - sat_pos["alt"]) ** 2 / 1e12 + (6371 * math.sin(math.radians(angle1))) ** 2)
-    rate1 = 500 * math.exp(-dist1 / 50000)
-    angle2 = calc_central_angle(geo_pos["lat"], geo_pos["lon"], gs["lat"], gs["lon"])
-    dist2 = math.sqrt((geo_pos["alt"] / 1000) ** 2 + (6371 * math.sin(math.radians(angle2))) ** 2)
-    rate2 = 400 * math.exp(-dist2 / 40000)
-    rate = min(rate1, rate2)
-    if data_type == "RAW_IMAGE":
-        rate = rate * 0.6
-    return max(rate, 5)
+    """单跳中继链路速率 (Mbps)，由链路预算引擎驱动。
+
+    分别计算 LEO→GEO 上行与 GEO→地面站下行的链路预算，
+    取瓶颈（可达速率最小）链路的速率。
+    """
+    dist_leo_geo_km = _slant_range_km(sat_pos, geo_pos)
+    dist_geo_gs_km = _slant_range_km(geo_pos, {
+        "lat": gs["lat"],
+        "lon": gs["lon"],
+        "alt": 0.0,
+    })
+    result = link_budget_relay(
+        dist_leo_geo_km=dist_leo_geo_km,
+        dist_geo_gs_km=dist_geo_gs_km,
+        data_type=data_type,
+    )
+    return max(result.achievable_rate_mbps, 5.0)
 
 
 def calculate_inter_satellite_rate(geo1_pos, geo2_pos):
-    """GEO 星间链路速率 (Mbps)。"""
-    angle = calc_central_angle(geo1_pos["lat"], geo1_pos["lon"], geo2_pos["lat"], geo2_pos["lon"])
-    dist = 2 * geo1_pos["alt"] / 1000 * math.sin(math.radians(angle) / 2)
-    rate = 2000 * math.exp(-dist / 40000)
-    return max(rate, 100)
+    """GEO 星间链路速率 (Mbps)，由链路预算引擎驱动。
+
+    使用 60 GHz 毫米波 ISL 参数（高增益、宽带宽）。
+    """
+    angle = calc_central_angle(
+        geo1_pos["lat"], geo1_pos["lon"],
+        geo2_pos["lat"], geo2_pos["lon"],
+    )
+    # GEO 轨道高度约 35786 km，两颗 GEO 之间的弦长
+    alt_km = geo1_pos["alt"] / 1000.0
+    dist_km = 2.0 * alt_km * math.sin(math.radians(angle) / 2.0)
+    dist_km = max(dist_km, 1.0)
+    result = link_budget_inter_satellite(distance_km=dist_km)
+    return max(result.achievable_rate_mbps, 100.0)
 
 
 def calculate_multi_hop_relay_rate(sat_pos, geo1_pos, geo2_pos, gs, data_type=None):
-    """多跳中继链路速率 (Mbps) - LEO→GEO1→GEO2→地面站。"""
-    angle1 = calc_central_angle(sat_pos["lat"], sat_pos["lon"], geo1_pos["lat"], geo1_pos["lon"])
-    dist1 = math.sqrt((geo1_pos["alt"] - sat_pos["alt"]) ** 2 / 1e12 + (6371 * math.sin(math.radians(angle1))) ** 2)
-    rate1 = 1500 * math.exp(-dist1 / 30000)
+    """多跳中继链路速率 (Mbps) - LEO→GEO1→GEO2→地面站，由链路预算引擎驱动。
+
+    计算三段链路的链路预算，取最小值作为端到端可达速率。
+    """
+    # LEO → GEO1
+    dist1_km = _slant_range_km(sat_pos, geo1_pos)
+    res1 = link_budget_relay(dist_leo_geo_km=dist1_km, dist_geo_gs_km=dist1_km, data_type=data_type)
+    rate1 = res1.achievable_rate_mbps
+
+    # GEO1 → GEO2 (ISL)
     rate2 = calculate_inter_satellite_rate(geo1_pos, geo2_pos)
-    angle3 = calc_central_angle(geo2_pos["lat"], geo2_pos["lon"], gs["lat"], gs["lon"])
-    dist3 = math.sqrt((geo2_pos["alt"] / 1000) ** 2 + (6371 * math.sin(math.radians(angle3))) ** 2)
-    rate3 = 1000 * math.exp(-dist3 / 20000)
+
+    # GEO2 → 地面站
+    dist3_km = _slant_range_km(geo2_pos, {
+        "lat": gs["lat"],
+        "lon": gs["lon"],
+        "alt": 0.0,
+    })
+    res3 = link_budget_direct(distance_km=dist3_km, antenna_type="Ka", data_type=data_type)
+    rate3 = res3.achievable_rate_mbps
+
     rate = min(rate1, rate2, rate3)
     if data_type == "RAW_IMAGE":
-        rate = rate * 0.5
-    return rate
+        rate *= 0.5
+    return max(rate, 5.0)
