@@ -30,6 +30,17 @@ from .laser_isl import (
     laser_isl_rate,
     laser_isl_check,
 )
+from .beam_pointing import (
+    BeamPointing,
+    BeamPointingResult,
+    check_scan_range,
+    scan_loss_db,
+    scan_loss_factor,
+    rate_with_scan_loss,
+    repoint_time_ms,
+    from_opportunistic_station,
+    from_geo_satellite,
+)
 
 __all__ = [
     "LinkBudget",
@@ -53,4 +64,14 @@ __all__ = [
     "check_los_visibility",
     "laser_isl_rate",
     "laser_isl_check",
+    # Beam pointing & phased-array scan constraints
+    "BeamPointing",
+    "BeamPointingResult",
+    "check_scan_range",
+    "scan_loss_db",
+    "scan_loss_factor",
+    "rate_with_scan_loss",
+    "repoint_time_ms",
+    "from_opportunistic_station",
+    "from_geo_satellite",
 ]
