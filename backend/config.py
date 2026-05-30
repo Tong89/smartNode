@@ -5,8 +5,15 @@
 便于统一调参与测试。数值与抽取前保持一致。
 """
 
+import os
+
 # 仿真时钟
 TIME_SCALE = 10  # 仿真加速倍率
+
+
+def debug_api_enabled():
+    """是否开启调试接口（默认关闭）。生产环境不暴露内部状态。"""
+    return os.environ.get("SMARTNODE_DEBUG_API", "").strip().lower() in ("1", "true", "yes", "on")
 
 # 资源带宽上限 (Mbps)
 SATELLITE_MAX_BANDWIDTH = 600

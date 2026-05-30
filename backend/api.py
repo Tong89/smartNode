@@ -16,7 +16,7 @@ from backend.auth import (
     decode_token,
     init_auth,
 )
-from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH
+from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH, debug_api_enabled
 from backend.envelope import ok
 from backend.errors import error_response, register_error_handlers
 from backend.rbac import require_role
@@ -116,14 +116,19 @@ def get_simulation_data():
 
 @app.route('/api/debug_status')
 def get_debug_status():
-    """获取调试状态 - 检查仿真线程是否存活"""
-    thread_alive = simulation_engine.simulation_thread.is_alive() if simulation_engine.simulation_thread else False
-    return jsonify({
+    """获取调试状态 - 仅在显式开启 SMARTNODE_DEBUG_API 时可用，默认返回 404。"""
+    if not debug_api_enabled():
+        return error_response("NOT_FOUND")
+    # 仅返回脱敏运行摘要，不暴露线程对象等实现细节
+    thread_alive = bool(
+        simulation_engine.simulation_thread and simulation_engine.simulation_thread.is_alive()
+    )
+    return ok({
         "simulation_running": simulation_engine.running,
         "simulation_thread_alive": thread_alive,
-        "current_time": simulation_engine.current_time,
-        "request_count": len(simulation_engine.transmission_requests),
-        "history_count": len(simulation_engine.request_history)
+        "current_time": round(simulation_engine.current_time, 2),
+        "active_requests": len(simulation_engine.transmission_requests),
+        "history_count": len(simulation_engine.request_history),
     })
 
 
