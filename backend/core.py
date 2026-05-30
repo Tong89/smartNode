@@ -40,6 +40,7 @@ from backend.orbit import OrbitalElements, calc_central_angle
 from backend.scheduling.handover import HandoverController
 from backend.resources import ResourceManager
 from backend.scheduling.scheduler import Scheduler
+from backend.scheduling.qos import QosAdmissionController, QOS_REJECTION_REASONS
 
 logger = logging.getLogger("smartnode")
 
@@ -131,23 +132,29 @@ DATA_TYPES = {
 REJECTION_REASONS = {
     # 资源类
     "NO_VISIBLE_GS": "当前无可见地面站",
-    "NO_VISIBLE_RELAY": "当前无可用中继链路", 
+    "NO_VISIBLE_RELAY": "当前无可用中继链路",
     "RESOURCE_BUSY": "所需资源正被占用",
     "BANDWIDTH_EXCEEDED": "中继带宽不足",
     "SATELLITE_OVERLOAD": "卫星任务队列已满",
-    
+
     # 超时类
     "TIMEOUT_WAIT": "等待超时（超过30分钟未开始传输，请重新提交）",
     "TIMEOUT_TRANSMISSION": "传输超时（传输过程异常中断）",
-    
+
     # 链路类
     "LINK_INTERRUPTED": "传输链路意外中断",
     "RAW_IMAGE_NO_DIRECT": "原始影像仅支持直连地面站传输",
-    
+
     # 系统类
     "SATELLITE_REMOVED": "分配的卫星已从系统移除",
     "TIME_WINDOW_INVALID": "指定的时间窗口无效",
-    "TIME_WINDOW_CONFLICT": "指定时间段与其他任务冲突"
+    "TIME_WINDOW_CONFLICT": "指定时间段与其他任务冲突",
+
+    # QoS 与安全级类（由 qos.py 定义，合并至此统一查询）
+    "QOS_HIGH_BANDWIDTH_RESERVED": "高QoS带宽预留：中继可用容量不足，拒绝低QoS请求",
+    "QOS_LOW_CONGESTION_REJECTED": "网络拥塞：低QoS请求在当前负载下被拒绝",
+    "SECURITY_TOP_SECRET_NO_DIRECT": "安全约束：绝密数据不允许直连地面站，需经加密中继链路",
+    "SECURITY_LINK_CONSTRAINT_VIOLATED": "安全约束：请求所要求的安全级别与可用链路不兼容",
 }
 
 # ==========================================
@@ -279,7 +286,8 @@ class TransmissionRequest:
 
     def __init__(self, data_type, data_size, priority, max_delay,
                  start_time=None, end_time=None, satellite_id=None, source="user",
-                 experiment_requirements=None, selected_ground_stations=None):
+                 experiment_requirements=None, selected_ground_stations=None,
+                 qos=None, security=None):
         # 线程安全地分配唯一请求编号，避免并发提交产生重复 REQ_ 编号
         with TransmissionRequest._id_lock:
             TransmissionRequest._id_counter += 1
@@ -300,7 +308,11 @@ class TransmissionRequest:
         self.error_injection = self.experiment_requirements.get("error_injection", None)
         self.telemetry_level = self.experiment_requirements.get("telemetry_level", "normal")
         self.custom_constraints = self.experiment_requirements.get("custom_constraints", {})
-        
+
+        # QoS 与安全级字段（None 表示未指定，与 "medium"/"public" 行为等价）
+        self.qos = qos  # "high" | "medium" | "low" | None
+        self.security = security  # "top_secret" | "secret" | "confidential" | "public" | None
+
         self.status = "pending"
         self.reject_reason = None
         self.assigned_link = None
@@ -355,7 +367,10 @@ class TransmissionRequest:
             "test_mode": self.test_mode,
             "error_injection": self.error_injection,
             "telemetry_level": self.telemetry_level,
-            "custom_constraints": self.custom_constraints
+            "custom_constraints": self.custom_constraints,
+            # QoS 与安全级维度
+            "qos": self.qos,
+            "security": self.security,
         }
 
 
@@ -408,8 +423,9 @@ class SimulationEngine:
         self.handover = HandoverController(
             HANDOVER_RATE_RATIO, HANDOVER_MIN_DWELL, HANDOVER_COOLDOWN, HANDOVER_MIN_ELEVATION
         )
-        # 链路选路与重调度集中于 Scheduler
-        self.scheduler = Scheduler(self)
+        # 链路选路与重调度集中于 Scheduler（使用 QoS 感知策略）
+        from backend.scheduling.qos import QosAwareStrategy
+        self.scheduler = Scheduler(self, strategy=QosAwareStrategy())
 
         # 背景任务生成器配置（降低频率以提高性能）
         self.background_task_enabled = False  # ⭐ 关闭背景任务，便于调试
@@ -1200,7 +1216,11 @@ class SimulationEngine:
             
             # 提取实验要求字段
             experiment_requirements = request_data.get("experiment_requirements", {})
-            
+
+            # 提取 QoS 与安全级字段（可选；None 表示未指定）
+            req_qos = request_data.get("qos")      # "high" | "medium" | "low"
+            req_security = request_data.get("security")  # "top_secret" | "secret" | "confidential" | "public"
+
             req = TransmissionRequest(
                 data_type=data_type,
                 data_size=request_data.get("data_size"),
@@ -1211,7 +1231,9 @@ class SimulationEngine:
                 satellite_id=satellite.sat_id,
                 source="user",  # 标记为用户请求
                 experiment_requirements=experiment_requirements,
-                selected_ground_stations=selected_ground_stations  # ⭐ 传递选定的地面站列表
+                selected_ground_stations=selected_ground_stations,  # ⭐ 传递选定的地面站列表
+                qos=req_qos,
+                security=req_security,
             )
             req.submit_time = self.current_time
             
@@ -1375,18 +1397,29 @@ class SimulationEngine:
 
     def _evaluate_request(self, req, satellite):
         """评估请求是否可以被接受 - 基于实时资源利用率和时间段决策"""
-        
+
         # ⭐ 实验要求：测试模式下，放宽资源检查
         if req.test_mode:
             # 测试模式：直接接受，用于快速验证功能
             return True, "测试模式：直接接受"
-        
+
         # 特殊处理：指令类型（TASK_CMD）立即接受，无需等待过境
         data_config = DATA_TYPES.get(req.data_type, {})
         if data_config.get("immediate", False):
             # 指令类型直接接受，稍后会自动寻找传输机会
             return True, "指令类型立即接受"
-        
+
+        # ⭐ QoS 与安全级准入检查（在时间窗口与资源检查之前执行）
+        qos_ctrl = QosAdmissionController(self)
+        qos_ok, qos_reason = qos_ctrl.check_admission(req)
+        if not qos_ok:
+            # 将拒绝原因码记录到统计中，并直接返回
+            for code, msg in REJECTION_REASONS.items():
+                if msg == qos_reason:
+                    self._record_rejection(code)
+                    break
+            return False, qos_reason
+
         # ⭐ 新增：检查用户指定的时间段
         if req.start_time is not None and req.end_time is not None:
             # 用户指定了具体时间段，需要检查资源池可用性
