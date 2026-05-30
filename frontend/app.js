@@ -206,6 +206,10 @@ const app = Vue.createApp({
           : (payload.message || payload.reject_reason || payload.error || '请求失败');
         throw new Error(message);
       }
+      // 透明解包统一成功包络 {code:0, data, meta, request_id}
+      if (payload && typeof payload === 'object' && payload.code === 0 && 'data' in payload) {
+        return payload.data;
+      }
       return payload;
     },
 
