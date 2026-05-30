@@ -44,6 +44,16 @@ class EventLog:
             items = [e for e in items if e.get("type") == event_type]
         return items
 
+    def trim(self, max_events):
+        """仅保留最近 max_events 条事件（内存与文件同步），控制存储增长。"""
+        with self._lock:
+            self._buffer = self._buffer[-max_events:]
+            if self.path:
+                with open(self.path, "w", encoding="utf-8") as f:
+                    for rec in self._buffer:
+                        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        return len(self._buffer)
+
     @staticmethod
     def read_file(path):
         out = []

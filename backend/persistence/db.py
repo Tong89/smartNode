@@ -76,5 +76,32 @@ class SqliteRepository:
             ).fetchone()
         return json.loads(row["payload"]) if row else None
 
+    # ---- 归档与清理（控制存储增长）----
+    def purge_requests_before(self, cutoff_ts):
+        """删除 submit_time 早于 cutoff_ts 的请求，返回删除行数。"""
+        with self._lock, self._conn:
+            cur = self._conn.execute("DELETE FROM requests WHERE submit_time < ?", (cutoff_ts,))
+            return cur.rowcount
+
+    def keep_last_requests(self, n):
+        """仅保留最近 n 条请求（按 submit_time），返回删除行数。"""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                """DELETE FROM requests WHERE id NOT IN (
+                       SELECT id FROM requests ORDER BY submit_time DESC LIMIT ?
+                   )""",
+                (n,),
+            )
+            return cur.rowcount
+
+    def prune_stats_snapshots(self, keep=100):
+        """仅保留最近 keep 条统计快照，返回删除行数。"""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM stats_snapshots WHERE id NOT IN (SELECT id FROM stats_snapshots ORDER BY id DESC LIMIT ?)",
+                (keep,),
+            )
+            return cur.rowcount
+
     def close(self):
         self._conn.close()
