@@ -29,6 +29,8 @@ import type {
   TransmissionRequestResult,
   UpdateResourceResult,
 } from '../api/endpoints';
+import { usePlayback } from '../composables/use-playback';
+import type { PlaybackSpeed } from '../composables/use-playback';
 
 /** Default polling interval in milliseconds */
 const DEFAULT_POLL_INTERVAL = 2000;
@@ -67,6 +69,24 @@ export const useSimulationStore = defineStore('simulation', () => {
   const resourceTimeline = ref<ResourceTimeline | null>(null);
 
   let pollingTimer: ReturnType<typeof window.setInterval> | null = null;
+
+  // ── Playback composable ────────────────────────────────────────────────────
+  /**
+   * Playback state and controls wired to the simulation clock and timeline.
+   * When the user drags the slider, playbackCursorTime diverges from systemTime
+   * so that components can render the historical snapshot.
+   */
+  const playback = usePlayback(
+    () => systemTime.value,
+    () => {
+      if (!resourceTimeline.value) return [0, Math.max(1, systemTime.value)] as [number, number];
+      return resourceTimeline.value.time_range as [number, number];
+    },
+    (_seekTime: number) => {
+      // Seek notification — currently used by watcher on playback.cursorTime
+      // to trigger filtered rendering; no additional async call required here.
+    },
+  );
 
   // ── Getters ────────────────────────────────────────────────────────────────
   const systemTime = computed(() => Number(systemData.value.time || 0));
@@ -154,6 +174,41 @@ export const useSimulationStore = defineStore('simulation', () => {
     ];
   });
 
+  // ── Playback getters ───────────────────────────────────────────────────────
+
+  /**
+   * The simulation time to use for rendering.
+   * When in historical mode this follows the playback cursor; otherwise it
+   * tracks the live systemTime.
+   */
+  const renderTime = computed<number>(() =>
+    playback.isHistorical.value ? playback.cursorTime.value : systemTime.value,
+  );
+
+  /**
+   * Events from the resource timeline that are active at renderTime.
+   * Used by GanttTimeline and CesiumScene overlays for situational replay.
+   */
+  const activeEventsAtRenderTime = computed(() => {
+    const tl = resourceTimeline.value;
+    if (!tl) return [];
+    const t = renderTime.value;
+    const collect = (bucket: Record<string, { events: Array<{ start: number; end: number }> }>) =>
+      Object.values(bucket).flatMap((res) =>
+        res.events.filter((ev) => ev.start <= t && ev.end >= t),
+      );
+    return [
+      ...collect(tl.satellites),
+      ...collect(tl.ground_stations),
+      ...collect(tl.geo_relays),
+    ];
+  });
+
+  // Keep cursor in sync with live time when not in historical / playing mode.
+  function tickPlaybackSync(): void {
+    playback.syncLive();
+  }
+
   // ── Actions ────────────────────────────────────────────────────────────────
 
   /** Fetch all backend data in parallel and update store state. */
@@ -220,6 +275,8 @@ export const useSimulationStore = defineStore('simulation', () => {
     void refreshAll();
     pollingTimer = window.setInterval(() => {
       void refreshAll();
+      // Sync the playback cursor to live time when not scrubbing.
+      tickPlaybackSync();
     }, pollInterval.value);
   }
 
@@ -273,6 +330,8 @@ export const useSimulationStore = defineStore('simulation', () => {
     resourceUtilization,
     throughputHistory,
     resourceTimeline,
+    // playback state (forwarded from composable)
+    playback,
     // getters
     systemTime,
     formattedTime,
@@ -290,6 +349,8 @@ export const useSimulationStore = defineStore('simulation', () => {
     utilizationRows,
     decisionMetrics,
     rejectionDistribution,
+    renderTime,
+    activeEventsAtRenderTime,
     // actions
     refreshAll,
     startPolling,

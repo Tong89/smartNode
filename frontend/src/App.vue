@@ -64,6 +64,21 @@
           @refresh="simStore.refreshAll"
         />
 
+        <TimePlayback
+          :visible="uiStore.activeView === 'playback'"
+          :has-data="!!simStore.resourceTimeline"
+          :playing="simStore.playback.playing.value"
+          :is-historical="simStore.playback.isHistorical.value"
+          :slider-fraction="simStore.playback.sliderFraction.value"
+          :cursor-label="simStore.playback.cursorLabel.value"
+          :end-label="playbackEndLabel"
+          :speed="simStore.playback.speed.value"
+          @toggle-play="simStore.playback.togglePlay"
+          @seek="simStore.playback.onSliderInput"
+          @set-speed="(s) => simStore.playback.setSpeed(s)"
+          @return-to-live="simStore.playback.returnToLive"
+        />
+
         <UtilizationBars :rows="simStore.utilizationRows" />
 
         <RequestList :requests="simStore.recentRequests" />
@@ -73,7 +88,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, onMounted, onBeforeUnmount, watch } from 'vue';
+import { defineComponent, ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useSimulationStore } from './stores/simulation';
 import { useUiStore } from './stores/ui';
 import TopBar from './components/TopBar.vue';
@@ -88,6 +103,7 @@ import RequestList from './components/RequestList.vue';
 import ScenarioPanel from './components/ScenarioPanel.vue';
 import GanttTimeline from './components/GanttTimeline.vue';
 import StatsChartsPanel from './components/StatsChartsPanel.vue';
+import TimePlayback from './components/TimePlayback.vue';
 
 export default defineComponent({
   name: 'App',
@@ -103,11 +119,23 @@ export default defineComponent({
     ScenarioPanel,
     GanttTimeline,
     StatsChartsPanel,
+    TimePlayback,
   },
 
   setup() {
     const simStore = useSimulationStore();
     const uiStore = useUiStore();
+
+    // ── Playback end-of-window label ──────────────────────────────────────────
+    const playbackEndLabel = computed<string>(() => {
+      const tl = simStore.resourceTimeline;
+      if (!tl) return simStore.formattedTime;
+      const total = Math.max(0, Math.floor(tl.time_range[1]));
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const s = total % 60;
+      return [h, m, s].map((p) => String(p).padStart(2, '0')).join(':');
+    });
 
     // ── Local UI state (form data, not shared globally) ───────────────────────
     const apiBaseDraft = ref(simStore.apiBase || window.location.origin);
@@ -235,6 +263,7 @@ export default defineComponent({
       apiBaseDraft,
       requestForm,
       resourceForm,
+      playbackEndLabel,
       saveApiBase,
       submitRequest,
       updateGroundStations,

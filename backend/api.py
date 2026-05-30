@@ -418,6 +418,91 @@ def get_resource_timeline():
         return jsonify(timeline_data)
 
 
+@app.route('/api/snapshot_at')
+def get_snapshot_at():
+    """返回指定仿真时刻的卫星位置快照，用于前端态势回放。
+
+    查询参数:
+        t (float, 必填): 目标仿真时刻（秒）。须落在历史时间窗口 [current_time - 3600, current_time] 内。
+
+    响应:
+        {
+            "t": <float>,
+            "satellites": [{ "id", "name", "type", "lat", "lon", "alt" }, ...],
+            "active_requests": [<request_id>, ...]   // 在 t 时刻正在传输的请求 ID 列表
+        }
+    """
+    raw_t = request.args.get("t")
+    if raw_t is None:
+        return error_response("VALIDATION_ERROR", "缺少查询参数 t（仿真时刻秒数）")
+    try:
+        target_t = float(raw_t)
+    except ValueError:
+        return error_response("VALIDATION_ERROR", "参数 t 须为浮点数")
+
+    with simulation_engine.lock:
+        current_time = simulation_engine.current_time
+        time_window = 3600.0
+        start_t = max(0.0, current_time - time_window)
+
+        if target_t < 0 or target_t > current_time + 1:
+            return error_response(
+                "VALIDATION_ERROR",
+                f"参数 t={target_t:.1f} 超出可回放范围 [0, {current_time:.1f}]"
+            )
+        # Clamp to the window start
+        target_t = max(start_t, target_t)
+
+        # ── 卫星位置（传播到目标时刻）──────────────────────────────────────
+        satellites_snap = []
+        for sat in simulation_engine.leo_satellites:
+            try:
+                lat, lon, alt = sat.propagate(target_t)
+                satellites_snap.append({
+                    "id": sat.sat_id,
+                    "name": sat.name,
+                    "type": "LEO",
+                    "lat": round(lat, 6),
+                    "lon": round(lon, 6),
+                    "alt": round(alt, 1),
+                })
+            except Exception:
+                logger.debug("propagate failed for sat %s at t=%s", sat.sat_id, target_t)
+
+        for sat in getattr(simulation_engine, 'meo_satellites', []):
+            try:
+                lat, lon, alt = sat.propagate(target_t)
+                satellites_snap.append({
+                    "id": sat.sat_id,
+                    "name": sat.name,
+                    "type": "MEO",
+                    "lat": round(lat, 6),
+                    "lon": round(lon, 6),
+                    "alt": round(alt, 1),
+                })
+            except Exception:
+                pass
+
+        # ── 在 target_t 时刻活跃的传输请求 ID ────────────────────────────
+        all_reqs = simulation_engine.transmission_requests + simulation_engine.request_history
+        active_at_t = []
+        for req in all_reqs:
+            if req.status in ("transmitting", "completed"):
+                ev_start = getattr(req, 'start_transmit_time', None) or getattr(req, 'submit_time', 0)
+                if req.status == "transmitting":
+                    ev_end = current_time
+                else:
+                    ev_end = getattr(req, 'complete_time', None) or (ev_start + 100)
+                if ev_start <= target_t <= ev_end:
+                    active_at_t.append(req.id)
+
+    return ok({
+        "t": target_t,
+        "satellites": satellites_snap,
+        "active_requests": active_at_t,
+    })
+
+
 @app.route('/api/resource_status')
 def get_resource_status():
     """
