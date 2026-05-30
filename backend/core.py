@@ -15,10 +15,14 @@ from datetime import datetime, timedelta
 from backend.config import (
     AGING_FACTOR,
     AGING_MAX,
+    HANDOVER_COOLDOWN,
+    HANDOVER_MIN_DWELL,
+    HANDOVER_MIN_ELEVATION,
     HANDOVER_RATE_RATIO,
     RESOURCE_TIGHT_THRESHOLD as CFG_RESOURCE_TIGHT_THRESHOLD,
 )
 from backend.physics.coordinates import ecef_to_lla, eci_to_ecef, lla_to_ecef
+from backend.scheduling.handover import HandoverController
 
 logger = logging.getLogger("smartnode")
 
@@ -863,6 +867,11 @@ class SimulationEngine:
         for geo in self.geo_relays:
             self.resource_time_pool["geo_relays"][geo["id"]] = []
         
+        # 链路切换控制器（迟滞 + 最小驻留 + 冷却，统一约束所有切换）
+        self.handover = HandoverController(
+            HANDOVER_RATE_RATIO, HANDOVER_MIN_DWELL, HANDOVER_COOLDOWN, HANDOVER_MIN_ELEVATION
+        )
+
         # 背景任务生成器配置（降低频率以提高性能）
         self.background_task_enabled = False  # ⭐ 关闭背景任务，便于调试
         self.background_task_interval = 30.0  # 每30秒生成一个背景任务（原10秒）
@@ -1505,59 +1514,38 @@ class SimulationEngine:
                     # ⭐⭐⭐ 核心修改：动态链路切换逻辑 (中继 -> 地面站) ⭐⭐⭐
                     # --------------------------------------------------
                     # 条件：当前用的是中继，且数据类型允许直连
-                    if req.transmission_method in ["relay", "multi_relay"]:
+                    if satellite and req.transmission_method in ["relay", "multi_relay"]:
                         data_config = DATA_TYPES.get(req.data_type, {})
                         if "direct" in data_config.get("allowed_links", []):
-                            
-                            # 遍历寻找是否有更好的地面站机会
+                            # 选出可见且空闲(或自占)的最佳直连地面站候选
+                            best_gs = None
+                            best_new_rate = 0
                             for gs in self.ground_stations:
-                                # 检查可见性 (设定 min_elevation=15 防止频繁切换不稳定的低仰角链路)
-                                if self.check_visibility(sat_pos, gs, min_elevation=15):
-                                    
-                                    # 检查该地面站是否空闲 (或已被自己占用)
-                                    gs_free = gs["id"] not in self.resource_usage["ground_stations"]
-                                    
-                                    if gs_free:
-                                        # 计算潜在的新速率
-                                        new_rate = self._calculate_direct_rate(sat_pos, gs, req.data_type)
-                                        
-                                        # 切换阈值：新速率必须比当前快 20% 才切换，避免乒乓效应
-                                        if new_rate > req.transmission_rate * HANDOVER_RATE_RATIO:
-                                            self._log(f"🔄 触发链路切换: 中继 -> 地面站 ({gs['name']}) 速率提升: {req.transmission_rate:.0f}->{new_rate:.0f}", request=req, level="high")
-                                            
-                                            # 1. 释放旧的中继资源 (手动操作资源字典)
-                                            if req.selected_relay and req.selected_relay in self.resource_usage["geo_relays"]:
-                                                if req.id in self.resource_usage["geo_relays"][req.selected_relay]:
-                                                    self.resource_usage["geo_relays"][req.selected_relay].remove(req.id)
-                                            
-                                            if req.selected_relay2 and req.selected_relay2 in self.resource_usage["geo_relays"]:
-                                                if req.id in self.resource_usage["geo_relays"][req.selected_relay2]:
-                                                    self.resource_usage["geo_relays"][req.selected_relay2].remove(req.id)
-                                                    
-                                            # 注意：不要释放卫星资源，因为还在同一颗卫星上
-                                            # 注意：不要释放地面站资源，因为之前是中继到地面，如果之前的地面站和现在不同，需要释放旧的
-                                            if req.selected_ground_station and req.selected_ground_station != gs["id"]:
-                                                if req.selected_ground_station in self.resource_usage["ground_stations"]:
-                                                    if req.id in self.resource_usage["ground_stations"][req.selected_ground_station]:
-                                                        self.resource_usage["ground_stations"][req.selected_ground_station].remove(req.id)
+                                if not self.check_visibility(sat_pos, gs, min_elevation=self.handover.min_elevation):
+                                    continue
+                                occ = self.resource_usage["ground_stations"].get(gs["id"], [])
+                                if occ and req.id not in occ:
+                                    continue
+                                nr = self._calculate_direct_rate(sat_pos, gs, req.data_type)
+                                if nr > best_new_rate:
+                                    best_new_rate = nr
+                                    best_gs = gs
 
-                                            # 2. 占用新的地面站资源
-                                            if gs["id"] not in self.resource_usage["ground_stations"]:
-                                                self.resource_usage["ground_stations"][gs["id"]] = []
-                                            self.resource_usage["ground_stations"][gs["id"]].append(req.id)
-                                            
-                                            # 3. 更新请求状态
-                                            req.transmission_method = "direct"
-                                            req.selected_ground_station = gs["id"]
-                                            req.selected_relay = None
-                                            req.selected_relay2 = None
-                                            req.transmission_rate = new_rate
-                                            
-                                            # 找到一个就切换，跳出循环
-                                            break
-                    # --------------------------------------------------
-                    # 结束动态切换逻辑
-                    # --------------------------------------------------
+                            # 统一经迟滞+最小驻留+冷却的控制器判定，并用 _apply_link_assignment 迁移资源
+                            if best_gs and self.handover.should_handover(req, self.current_time, best_new_rate):
+                                old_rate = req.transmission_rate
+                                self._apply_link_assignment(req, satellite, {
+                                    "method": "direct",
+                                    "ground_station": best_gs["id"],
+                                    "relay": None,
+                                    "relay2": None,
+                                    "rate": best_new_rate,
+                                })
+                                self.handover.record_switch(req, self.current_time)
+                                self._log(
+                                    f"🔄 链路切换: 中继 -> 直连 ({best_gs['name']}) 速率 {old_rate:.0f}->{best_new_rate:.0f}Mbps",
+                                    request=req, level="high",
+                                )
 
                 # 更新传输进度
                 if req.transmission_rate > 0:
