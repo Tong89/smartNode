@@ -142,6 +142,43 @@ open htmlcov/index.html
 
 CI 工作流（`.github/workflows/ci.yml`）会在 Python 3.10、3.11、3.12 上并行执行上述步骤，并将 `coverage.xml` 作为工件上传，供后续分析使用。覆盖率低于门禁阈值时 CI 显式失败。
 
+## 环境变量配置
+
+SmartNode 支持通过环境变量定制部署参数，无需修改代码。
+将 `.env.example` 复制为 `.env` 并按需修改（`.env` 不应入库）：
+
+```bash
+cp .env.example .env
+# 编辑 .env，根据需要修改参数
+```
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SMARTNODE_HOST` | `127.0.0.1` | 服务监听地址（容器部署改为 `0.0.0.0`） |
+| `SMARTNODE_PORT` | `5000` | 服务监听端口 |
+| `SMARTNODE_ENV` | `development` | 运行环境，`production` 时强制校验密钥 |
+| `SMARTNODE_TIME_SCALE` | `10` | 仿真时间倍率（1=实时，10=推荐演示，600=极速） |
+| `SMARTNODE_LOG_LEVEL` | `INFO` | 日志级别：`DEBUG`/`INFO`/`WARNING`/`ERROR` |
+| `LOG_FORMAT` | `console` | 日志格式：`console`（彩色）或 `json`（适合容器） |
+| `SMARTNODE_JWT_SECRET` | *(示例值)* | JWT 签名密钥（生产必须替换） |
+| `SMARTNODE_API_KEY` | *(空)* | API Key 鉴权（空则开放模式） |
+| `SMARTNODE_CORS_ORIGINS` | 本机回环 | 允许的 CORS 来源（逗号分隔） |
+| `SMARTNODE_DEBUG_API` | `0` | 开启 `/api/debug_status` 接口（`1` 启用） |
+| `SMARTNODE_SEED` | *(空)* | 随机种子（填入整数可复现仿真轨迹） |
+
+**生产部署示例：**
+
+```bash
+export SMARTNODE_ENV=production
+export SMARTNODE_HOST=0.0.0.0
+export SMARTNODE_PORT=5000
+export SMARTNODE_TIME_SCALE=60
+export SMARTNODE_LOG_LEVEL=WARNING
+export LOG_FORMAT=json
+export SMARTNODE_JWT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+python backend/app.py
+```
+
 ## 说明
 
 - 当前版本适合本地仿真、教学展示和二次开发。
