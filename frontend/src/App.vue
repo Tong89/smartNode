@@ -47,6 +47,12 @@
           @scenario-changed="simStore.refreshAll"
         />
 
+        <GanttTimeline
+          :visible="uiStore.activeView === 'timeline'"
+          :timeline="simStore.resourceTimeline"
+          @refresh="simStore.refreshAll"
+        />
+
         <UtilizationBars :rows="simStore.utilizationRows" />
 
         <RequestList :requests="simStore.recentRequests" />
@@ -69,6 +75,7 @@ import type { ResourceFormData } from './components/ResourcePanel.vue';
 import UtilizationBars from './components/UtilizationBars.vue';
 import RequestList from './components/RequestList.vue';
 import ScenarioPanel from './components/ScenarioPanel.vue';
+import GanttTimeline from './components/GanttTimeline.vue';
 
 export default defineComponent({
   name: 'App',
@@ -82,6 +89,7 @@ export default defineComponent({
     UtilizationBars,
     RequestList,
     ScenarioPanel,
+    GanttTimeline,
   },
 
   setup() {

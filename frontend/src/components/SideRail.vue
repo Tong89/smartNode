@@ -27,6 +27,15 @@
       <i data-lucide="bookmark"></i>
       <span>场景</span>
     </button>
+    <button
+      :class="{ active: activeView === 'timeline' }"
+      type="button"
+      @click="$emit('set-view', 'timeline')"
+      title="时间轴"
+    >
+      <i data-lucide="gantt-chart"></i>
+      <span>时间轴</span>
+    </button>
   </nav>
 </template>
 

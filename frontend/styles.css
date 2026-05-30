@@ -671,6 +671,166 @@ progress::-moz-progress-bar {
   font-size: 13px;
 }
 
+/* ── 甘特图时间轴 ─────────────────────────────────────────────────── */
+.gantt-panel {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.gantt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 14px 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.dot-transmitting {
+  background: var(--accent);
+}
+
+.dot-completed {
+  background: var(--blue);
+}
+
+.gantt-scale {
+  position: relative;
+  height: 18px;
+  font-size: 10px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  margin: 0 14px;
+  flex-shrink: 0;
+}
+
+.gantt-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  top: 2px;
+}
+
+.gantt-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 0 14px 8px;
+}
+
+.gantt-group-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 8px 0 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 2px;
+}
+
+.gantt-row {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  margin-bottom: 3px;
+}
+
+.gantt-label {
+  font-size: 11px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  padding-right: 6px;
+}
+
+.gantt-track {
+  position: relative;
+  flex: 1;
+  height: 14px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.gantt-bar {
+  position: absolute;
+  top: 1px;
+  height: 12px;
+  border-radius: 2px;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+  cursor: default;
+}
+
+.gantt-bar:hover {
+  opacity: 1;
+  z-index: 1;
+}
+
+/* 按状态着色 */
+.gantt-bar.bar-transmitting {
+  background: var(--accent);
+}
+
+.gantt-bar.bar-completed {
+  background: var(--blue);
+}
+
+/* 按数据类型的纹理叠加（优先级次于状态色，仅加细边） */
+.gantt-bar.bar-dt-raw_image {
+  border-top: 2px solid rgba(255, 255, 255, 0.5);
+}
+
+.gantt-bar.bar-dt-intel {
+  border-top: 2px solid rgba(255, 200, 80, 0.6);
+}
+
+.gantt-bar.bar-dt-task_cmd {
+  border-top: 2px solid rgba(200, 80, 80, 0.6);
+}
+
+/* 悬浮详情气泡 */
+.gantt-tooltip {
+  margin: 6px 14px 8px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  flex-shrink: 0;
+}
+
+.tooltip-key {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tooltip-val {
+  color: var(--ink);
+  font-weight: 500;
+}
+
 .cesium-viewer-bottom,
 .cesium-credit-logoContainer,
 .cesium-credit-textContainer {
