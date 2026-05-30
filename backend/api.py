@@ -16,6 +16,7 @@ from backend.auth import (
     decode_token,
     init_auth,
 )
+from backend.config import GS_MAX_BANDWIDTH, SATELLITE_MAX_BANDWIDTH
 from backend.errors import error_response, register_error_handlers
 from backend.rbac import require_role
 from backend.ratelimit import rate_limit
@@ -332,7 +333,7 @@ def get_resource_status():
         total_sat_bandwidth_used = 0.0
         
         # ⭐ 单星最大带宽设为600Mbps（考虑直连和中继叠加）
-        SATELLITE_MAX_BANDWIDTH = 600
+        # 单星最大带宽见 backend/config.py
         
         for sat in simulation_engine.leo_satellites:
             sat_id = sat.sat_id
@@ -375,7 +376,7 @@ def get_resource_status():
         busy_gs = 0
         
         # ⭐ 地面站最大带宽设为1000Mbps
-        GS_MAX_BANDWIDTH = 1000
+        # 地面站最大带宽见 backend/config.py
         
         for gs in simulation_engine.ground_stations:
             gs_id = gs["id"]
