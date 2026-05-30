@@ -1,0 +1,9 @@
+# requirements.in — 直接依赖（source constraints）
+# 使用 pip-compile 从此文件生成锁定的 requirements.txt：
+#   pip install pip-tools
+#   pip-compile --generate-hashes requirements.in
+#
+# 运行时依赖（仅列出直接依赖，传递依赖由 pip-compile 自动解析并锁定）
+
+Flask>=3.0,<4.0
+PyJWT>=2.8,<3.0

@@ -32,10 +32,39 @@ smartNode/
 │  └─ styles.css
 ├─ main.py            # 兼容入口
 ├─ run_server.bat     # Windows 快速启动脚本
-├─ requirements.txt
+├─ requirements.in        # 运行时直接依赖（source constraints）
+├─ requirements.txt       # 锁定的运行时依赖（pip-compile 生成，含哈希）
+├─ requirements-dev.in    # 开发依赖（source constraints）
+├─ requirements-dev.txt   # 锁定的开发依赖（pip-compile 生成，含哈希）
 ├─ LICENSE
 └─ README.md
 ```
+
+## 依赖管理
+
+本项目使用 [pip-tools](https://github.com/jazzband/pip-tools) 管理可复现的依赖树：
+
+| 文件 | 说明 |
+| --- | --- |
+| `requirements.in` | 运行时直接依赖（人工维护的 source constraints） |
+| `requirements.txt` | 锁定的运行时依赖（由 `pip-compile` 自动生成，含 SHA-256 哈希） |
+| `requirements-dev.in` | 开发/测试直接依赖（source constraints，包含 `-r requirements.in`） |
+| `requirements-dev.txt` | 锁定的开发依赖（由 `pip-compile` 自动生成，含 SHA-256 哈希） |
+
+**更新依赖版本：**
+
+```bash
+pip install pip-tools
+
+# 仅更新运行时依赖
+pip-compile --generate-hashes requirements.in
+
+# 更新开发依赖（会同时拉取最新运行时依赖）
+pip-compile --generate-hashes requirements-dev.in
+```
+
+> **注意**：永远不要手动编辑 `requirements.txt` 或 `requirements-dev.txt`。
+> 请修改对应的 `.in` 文件，然后重新运行 `pip-compile` 生成锁定文件。
 
 ## 快速开始
 

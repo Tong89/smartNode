@@ -1,0 +1,23 @@
+# requirements-dev.in — 开发依赖（source constraints）
+# 使用 pip-compile 从此文件生成锁定的 requirements-dev.txt：
+#   pip install pip-tools
+#   pip-compile --generate-hashes requirements-dev.in
+#
+# 开发依赖包含所有运行时依赖
+-r requirements.in
+
+# 测试框架
+pytest>=8.0,<9.0
+pytest-cov>=5.0,<6.0
+pytest-benchmark>=4.0,<5.0
+hypothesis>=6.100,<7.0
+
+# 代码风格 / Lint（与 quality.yml 保持同步）
+ruff>=0.4,<1.0
+black>=24.0,<25.0
+
+# 静态类型检查
+mypy>=1.10,<2.0
+
+# 负载 / 压力测试
+locust>=2.20,<3.0
