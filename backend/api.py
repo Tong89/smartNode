@@ -18,6 +18,7 @@ from backend.auth import (
 )
 from backend.errors import error_response, register_error_handlers
 from backend.rbac import require_role
+from backend.ratelimit import rate_limit
 from backend.schemas import (
     ValidationError,
     validate_count_update,
@@ -126,6 +127,7 @@ def get_debug_status():
 
 @app.route('/api/request', methods=['POST'])
 @require_role('operator')
+@rate_limit(30, 60)
 def submit_transmission_request():
     """提交传输请求"""
     # 检查权限 - 仅管理员可提交请求
@@ -489,6 +491,7 @@ def get_resource_status():
 
 @app.route('/api/update_ground_stations', methods=['POST'])
 @require_role('admin')
+@rate_limit(10, 60)
 def update_ground_stations():
     """更新地面站数量"""
     # 检查权限 - 仅管理员可修改配置
@@ -521,6 +524,7 @@ def update_ground_stations():
 
 @app.route('/api/update_leo_satellites', methods=['POST'])
 @require_role('admin')
+@rate_limit(10, 60)
 def update_leo_satellites():
     """⭐ 更新LEO卫星数量 - 轨道参数预先已知"""
     # 检查权限 - 仅管理员可修改配置
