@@ -663,9 +663,13 @@ def get_data_combinations():
 # 7. 场景保存 / 加载 / 导入导出 API
 # ==========================================
 from backend.scenario import ScenarioManager as _ScenarioManager  # noqa: E402
+from backend.store import ScenarioStore as _ScenarioStore  # noqa: E402
 
 # 内存中保存最近一次持久化的场景（进程重启后丢失；持久化到磁盘可由外部挂载卷实现）
 _saved_scene: dict | None = None
+
+# 多场景库（内存 SQLite；生产可换为文件路径）
+_scenario_store = _ScenarioStore()
 
 
 @app.route('/api/scenario/save', methods=['POST'])
@@ -802,6 +806,140 @@ def scenario_import():
 def scenario_current():
     """返回当前内存中保存的场景（若有）；否则返回空。"""
     return ok(_saved_scene)
+
+
+# ==========================================
+# 7b. 多场景库管理 API
+# ==========================================
+
+@app.route('/api/scenarios', methods=['GET'])
+def scenarios_list():
+    """列出场景库中全部命名场景的摘要（不含完整统计）。
+
+    响应示例::
+
+        {"code": 0, "data": [
+          {"id": 1, "name": "基准", "saved_at": "2024-...", "is_baseline": true,
+           "gs_count": 10, "leo_count": 20, "geo_count": 4},
+          ...
+        ]}
+    """
+    try:
+        items = _scenario_store.list_scenarios()
+    except Exception:
+        logger.exception("场景库列表查询失败")
+        return error_response("INTERNAL_ERROR")
+    return ok(items)
+
+
+@app.route('/api/scenarios', methods=['POST'])
+@require_role('admin')
+@rate_limit(20, 60)
+def scenarios_save():
+    """将当前仿真资源配置与运行统计快照保存到场景库（按名称 upsert）。
+
+    请求体（JSON）::
+
+        {"name": "场景名称"}   # name 必填，最长 128 字符
+
+    响应返回完整场景记录。
+    """
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name", "")).strip()
+    if not name:
+        return error_response("VALIDATION_ERROR", "缺少必填字段 'name'")
+    try:
+        stats = simulation_engine.get_stats()
+        record = _scenario_store.save_scenario(name, simulation_engine, stats)
+    except ValueError as ve:
+        return error_response("VALIDATION_ERROR", str(ve))
+    except Exception:
+        logger.exception("场景库保存失败")
+        return error_response("INTERNAL_ERROR")
+    return ok(record)
+
+
+@app.route('/api/scenarios/<path:name>', methods=['DELETE'])
+@require_role('admin')
+@rate_limit(20, 60)
+def scenarios_delete(name: str):
+    """删除场景库中指定名称的场景。"""
+    try:
+        deleted = _scenario_store.delete_scenario(name)
+    except Exception:
+        logger.exception("场景库删除失败")
+        return error_response("INTERNAL_ERROR")
+    if not deleted:
+        return error_response("NOT_FOUND", f"场景 '{name}' 不存在")
+    return ok({"deleted": True, "name": name})
+
+
+@app.route('/api/scenarios/<path:name>/activate', methods=['POST'])
+@require_role('admin')
+@rate_limit(10, 60)
+def scenarios_activate(name: str):
+    """将场景库中指定场景的资源配置应用到仿真引擎（切换场景）。"""
+    try:
+        result = _scenario_store.switch_to(name, simulation_engine)
+    except KeyError as ke:
+        return error_response("NOT_FOUND", str(ke))
+    except ValueError as ve:
+        return error_response("VALIDATION_ERROR", str(ve))
+    except Exception:
+        logger.exception("场景切换失败")
+        return error_response("INTERNAL_ERROR")
+    return ok(result)
+
+
+@app.route('/api/scenarios/<path:name>/baseline', methods=['POST'])
+@require_role('admin')
+@rate_limit(10, 60)
+def scenarios_set_baseline(name: str):
+    """将指定场景设为基线（用于对比参考）。"""
+    try:
+        ok_flag = _scenario_store.set_baseline(name)
+    except Exception:
+        logger.exception("设置基线失败")
+        return error_response("INTERNAL_ERROR")
+    if not ok_flag:
+        return error_response("NOT_FOUND", f"场景 '{name}' 不存在")
+    return ok({"baseline": name})
+
+
+@app.route('/api/scenario/compare', methods=['GET'])
+def scenario_compare():
+    """对比两个命名场景的决策指标，返回差值分析报告。
+
+    查询参数：
+        ``a=<场景名称A>``（必填）
+        ``b=<场景名称B>``（必填）
+
+    响应示例::
+
+        {"code": 0, "data": {
+          "scenario_a": {"name": "基准", "saved_at": "...", "is_baseline": true},
+          "scenario_b": {"name": "扩容", "saved_at": "...", "is_baseline": false},
+          "resource_diff": {"gs_count": {"a": 10, "b": 15, "delta": 5}, ...},
+          "metrics": {
+            "acceptance_rate": {"label": "接受率", "a": 0.8, "b": 0.9,
+                                "delta": 0.1, "delta_pct": 12.5},
+            ...
+          },
+          "summary": "场景 '扩容' 相对 '基准' 整体性能提升"
+        }}
+    """
+    name_a = (request.args.get("a") or "").strip()
+    name_b = (request.args.get("b") or "").strip()
+    if not name_a or not name_b:
+        return error_response("VALIDATION_ERROR", "必须通过查询参数 a 和 b 指定两个场景名称")
+    try:
+        report = _scenario_store.compare(name_a, name_b)
+    except KeyError as ke:
+        return error_response("NOT_FOUND", str(ke))
+    except Exception:
+        logger.exception("场景对比失败")
+        return error_response("INTERNAL_ERROR")
+    return ok(report)
 
 
 # ==========================================
